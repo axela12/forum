@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block body %}
+
+    <form action="{{ url_for('login') }}" method="post">
+        <input type="text" name="username" placeholder="Ange användarnamn">
+        <button type="submit">Logga in</button>
+        {% for message in get_flashed_messages() %}
+            <div class="flash">{{ message }}</div>
+        {% endfor %}
+    </form>
+
+{% endblock %}

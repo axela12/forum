@@ -1,0 +1,28 @@
+.flash{
+    color: red;
+}
+
+#box {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid black;
+    width: fit-content;
+}
+
+#input {
+    display: flex;
+}
+
+#inputbox {
+    width: 100%;
+}
+
+#messages {
+    border: 1px solid black;
+    box-sizing: border-box;
+    padding-left: 5px;
+    overflow-y: scroll;
+    word-wrap: break-word;
+    width: 400px;
+    height: 300px;
+}
