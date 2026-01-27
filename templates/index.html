@@ -2,4 +2,26 @@
 
 {% block body %}
 <h1>Welcome to the Home Page</h1>
+
+{% if session['user_id'] %}
+    <p>Hello, {{ session['username'] }}!</p>
+    <button onclick="logout()">log out</button>
+{% else %}
+    <div class="auth">
+        <form id="loginForm">
+            <input type="text" id="loginUsername" placeholder="Username" required>
+            <input type="password" id="loginPassword" placeholder="Password" required>
+            <button type="submit">Log In</button>
+        </form>
+        <form id="registerForm">
+            <input type="text" id="registerUsername" placeholder="Username" required>
+            <input type="password" id="registerPassword" placeholder="Password" required>
+            <button type="submit">Register</button>
+        </form>
+    </div>
+    <button onclick="login()">log in</button>
+    <br>
+    <button onclick="register()">register</button>
+{% endif %}
+
 {% endblock %}
