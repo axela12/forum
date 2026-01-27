@@ -1,8 +1,7 @@
-from flask import Flask, render_template, request, jsonify, url_for
+from flask import Flask, render_template, request, jsonify, url_for, session
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
-import mysql.connector
-from mysql.connector import Error
+from mysql.connector import Error, connect
 from werkzeug.security import check_password_hash, generate_password_hash
 
 app = Flask(__name__)
@@ -21,7 +20,7 @@ socketio = SocketIO(app)
 
 def get_db_connection():
     try:
-        connection = mysql.connector.connect(**DB_CONFIG)
+        connection = connect(**DB_CONFIG)
         return connection
     except Error as e:
         print(f"Fel vid anslutning till MySQL: {e}")

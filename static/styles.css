@@ -1,10 +1,82 @@
-.auth {
-    display: flex;
-    justify-content: flex-end;
-    margin: 10px;
-    display: none;
+/* Body font */
+body {
+    font-family: Arial, sans-serif;
 }
 
-.auth.hidden {
-    display: none;
+/* Overlay */
+.auth-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding-top: 50px;
+    z-index: 9999;
+    animation: fadeInOverlay 0.4s ease forwards;
+}
+
+@keyframes fadeInOverlay {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* Modal box */
+.auth {
+    position: relative;
+    background-color: turquoise;
+    padding: 40px 20px 20px 20px;
+    border-radius: 8px;
+    min-width: 300px;
+    max-width: 400px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    animation: slideDown 0.4s ease forwards;
+}
+
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-20px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Cancel button: bigger circular, top-right */
+#closeButton {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 40px;      /* bigger width */
+    height: 40px;     /* bigger height */
+    border-radius: 50%; /* circular */
+    cursor: pointer;
+    padding: 0;
+    font-size: 22px;   /* bigger × */
+    line-height: 38px; /* center the × vertically */
+    text-align: center;
+}
+
+/* H1 styling */
+.auth h1 {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+/* Form layout */
+.form-column {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+}
+
+/* Inputs and submit button same width, but default button styling */
+.form-column input,
+.form-column button[type="submit"] {
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+    border-radius: 4px;
+    box-sizing: border-box;
+    /* Keep default colors and borders */
 }

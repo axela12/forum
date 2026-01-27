@@ -3,25 +3,22 @@
 {% block body %}
 <h1>Welcome to the Home Page</h1>
 
+<p>
+    This is the main landing page of the web application.
+    feel free to log in or sign up to access more features.
+    for now, you can browse as a guest.
+    lorem ipsum dolor sit amet, consectetur
+    adipiscing elit, sed do eiusmod tempor
+    incididunt ut labore et dolore magna aliqua.
+</p>
+
 {% if session['user_id'] %}
     <p>Hello, {{ session['username'] }}!</p>
-    <button onclick="logout()">log out</button>
+    <a href="#" id="logoutButton">log out</a>
 {% else %}
-    <div class="auth">
-        <form id="loginForm">
-            <input type="text" id="loginUsername" placeholder="Username" required>
-            <input type="password" id="loginPassword" placeholder="Password" required>
-            <button type="submit">Log In</button>
-        </form>
-        <form id="registerForm">
-            <input type="text" id="registerUsername" placeholder="Username" required>
-            <input type="password" id="registerPassword" placeholder="Password" required>
-            <button type="submit">Register</button>
-        </form>
-    </div>
-    <button onclick="login()">log in</button>
+    <a href="#" id="loginButton">log in</button>
     <br>
-    <button onclick="register()">register</button>
+    <a href="#" id="signupButton">sign up</a>
 {% endif %}
 
 {% endblock %}
