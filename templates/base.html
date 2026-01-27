@@ -9,10 +9,24 @@
     {% endblock %}
 </head>
 <body>
+    <header>
+        <nav>
+            {% if session['user_id'] %}
+                <p>Hello, {{ session['username'] }}!</p>
+                <a href="#" id="logoutButton">log out</a>
+            {% else %}
+                <a href="#" id="loginButton">log in</a>
+                <a href="#" id="signupButton">sign up</a>
+            {% endif %}
+        </nav>
+    </header>
 
-{% block body %}
-{% endblock %}
+    <div class="container">
+        {% block body %}
+        {% endblock %}
+    </div>
 
-<script src="{{ url_for('static', filename='script.js') }}"></script>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

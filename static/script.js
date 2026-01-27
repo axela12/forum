@@ -13,11 +13,13 @@ document.getElementById('loginButton').addEventListener('click', e => {
             <input type="text" id="username" placeholder="Username" required>
             <input type="password" id="password" placeholder="Password" required>
             <button type="submit">Log In</button>
+            <a href="/register">Don't have an account? Register</a>
         </form>
     `;
 
     overlay.appendChild(div);
     document.body.appendChild(overlay);
+    div.querySelector('#closeButton').focus();
 
     // Close on Cancel button
     div.querySelector('#closeButton').addEventListener('click', () => {

@@ -51,7 +51,7 @@ body {
     border-radius: 50%; /* circular */
     cursor: pointer;
     padding: 0;
-    font-size: 22px;   /* bigger × */
+    font-size: 30px;   /* bigger × */
     line-height: 38px; /* center the × vertically */
     text-align: center;
 }
