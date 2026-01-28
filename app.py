@@ -4,6 +4,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 from mysql.connector import Error, connect
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_wtf import CSRFProtect
+from flask_wtf.csrf import validate_csrf, CSRFError, generate_csrf
 
 app = Flask(__name__)
 CORS(app)
@@ -34,6 +35,11 @@ def index():
 @app.route('/register', methods = ['GET'])
 def get_register():
     return render_template('register.html')
+
+@app.route('/api/get_csrf', methods=['GET'])
+def get_csrf():
+    token = generate_csrf()
+    return jsonify({"csrf_token": token})
 
 @app.route('/api/register', methods = ['POST'])
 def register():
@@ -79,12 +85,10 @@ def register():
         user = cursor.fetchone()
         session['user_id'] = user['id']
         session['username'] = user['username']
-        return jsonify({"success"})
-
+        return jsonify({"message": "success"})
     except Error as e:
         print(f"Databasfel: {e}")
         return jsonify({"error": "Databasfel inträffade"}), 500
-    
     finally:
         if connection.is_connected():
             cursor.close()
@@ -118,15 +122,13 @@ def login():
             # Inloggning lyckades - spara användarinfo i session
             session['user_id'] = user['id']
             session['username'] = user['username']
-            return f"Inloggning lyckades! Välkommen {session['username']}!"
+            return jsonify({"message": "success"})
         else:
             # Inloggning misslyckades, skicka http status 401 (Unauthorized)
             return jsonify({"error": "Ogiltigt användarnamn eller lösenord"}), 401
-
     except Error as e:
         print(f"Databasfel: {e}")
         return jsonify({"error": "Databasfel inträffade"}), 500
-    
     finally:
         if connection.is_connected():
             cursor.close()
@@ -134,13 +136,8 @@ def login():
 
 @app.route('/api/logout', methods=['POST'])
 def logout():
-    data = request.get_json(silent=True)
-
-    if data is None:
-        return jsonify({"error": "Invalid or missing JSON"}), 400
-
-    session.pop('user_id', None)
-    session.pop('username', None)
+    session.clear()
+    return jsonify({"message": "success"})
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, port=5000)

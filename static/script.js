@@ -40,25 +40,31 @@ document.querySelector('#logoutForm')?.addEventListener('submit', e => {
 document.querySelector('#registerForm')?.addEventListener('submit', async e => {
     e.preventDefault();
 
+    const csrf_token = await fetch('/api/get_csrf').then(res => res.json()).then(data => data.csrf_token);
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
     const confirmPassword = document.getElementById('confirmPassword').value;
     const name = document.getElementById('name').value;
 
-    try {
-        const res = await fetch('/api/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+    fetch('/api/login', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrf_token
+        },
+        body: JSON.stringify({
                 'username': username,
                 'password': password,
                 'confirmPassword': confirmPassword,
                 'name': name
-            })
-        });
-
-        const data = await res.json().catch(() => null); // safely parse JSON
-
+        })
+    })
+    .then(res => 
+        res.json()
+        .catch(() => null) // safely parse JSON
+        .then(data => ({ res, data })) // pass both response and data down the chain
+    )
+    .then(({ res, data }) => {
         if (!res.ok) {
             // Handle server errors
             console.error("Login error:", data?.error || `HTTP ${res.status}`);
@@ -66,18 +72,23 @@ document.querySelector('#registerForm')?.addEventListener('submit', async e => {
             // Successful login
             window.location.href = '/';
         }
-    } catch (error) {
+    })
+    .catch(error => {
         console.error("Error:", error);
-    }
+    });
 });
 
 async function login() {
+    const csrf_token = await fetch('/api/get_csrf').then(res => res.json()).then(data => data.csrf_token);
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
 
     fetch('/api/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrf_token
+        },
         body: JSON.stringify({
             username: username,
             password: password
@@ -103,13 +114,13 @@ async function login() {
 }
 
 async function logout() {
-    const csrfToken = document.querySelector('#logoutForm input[name="csrf_token"]').value;
+    const csrf_token = await fetch('/api/get_csrf').then(res => res.json()).then(data => data.csrf_token);
 
     fetch('/api/logout', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken
+            'X-CSRF-Token': csrf_token
         }
     })
     .then(res => 
