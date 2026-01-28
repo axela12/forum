@@ -11,12 +11,14 @@
 <body>
     <header>
         <nav>
+            <a href="/">hem</a>
             {% if session['user_id'] %}
-                <p>Hello, {{ session['username'] }}!</p>
-                <a href="#" id="logoutButton">log out</a>
+                <form id="logoutForm" style="display: inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="submit" value="log out">
+                </form>
             {% else %}
-                <a href="#" id="loginButton">log in</a>
-                <a href="#" id="signupButton">sign up</a>
+                <button id="loginButton">log in</button>
             {% endif %}
         </nav>
     </header>

@@ -78,5 +78,8 @@ body {
     font-size: 16px;
     border-radius: 4px;
     box-sizing: border-box;
-    /* Keep default colors and borders */
+}
+
+button:hover {
+    cursor: pointer;
 }
