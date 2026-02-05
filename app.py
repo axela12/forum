@@ -1,15 +1,26 @@
-from flask import Flask, render_template, request, jsonify, url_for, session
+from flask import Flask, render_template, request, jsonify, url_for
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from mysql.connector import Error, connect
 from werkzeug.security import check_password_hash, generate_password_hash
-from flask_wtf import CSRFProtect
-from flask_wtf.csrf import validate_csrf, CSRFError, generate_csrf
+from flask_jwt_extended import (
+    JWTManager, create_access_token, jwt_required, get_jwt_identity, get_jwt
+)
+from datetime import timedelta
 
 app = Flask(__name__)
 CORS(app)
-app.secret_key = 'secret_key'
-csrf = CSRFProtect(app)
+socketio = SocketIO(app)
+
+JWT_SECRET = "super_hemlig_nyckel"
+JWT_ALGORITHM = "HS256"
+JWT_EXP_MINUTES = 30
+
+app.config["JWT_SECRET_KEY"] = JWT_SECRET
+app.config["JWT_ALGORITHM"] = JWT_ALGORITHM
+app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(minutes=JWT_EXP_MINUTES)
+
+jwt = JWTManager(app)
 
 DB_CONFIG = {
     'host': 'localhost',
@@ -17,8 +28,6 @@ DB_CONFIG = {
     'password': '',
     'database': 'forum_db'
 }
-
-socketio = SocketIO(app)
 
 def get_db_connection():
     try:
@@ -32,112 +41,135 @@ def get_db_connection():
 def index():
     return render_template('index.html')
 
-@app.route('/register', methods = ['GET'])
-def get_register():
-    return render_template('register.html')
-
-@app.route('/api/get_csrf', methods=['GET'])
-def get_csrf():
-    token = generate_csrf()
-    return jsonify({"csrf_token": token})
-
-@app.route('/api/register', methods = ['POST'])
-def register():
-    data = request.get_json(silent=True)
-
-    if data is None:
-        return jsonify({"error": "Invalid or missing JSON"}), 400
-
-    username = data.get("username")
-    password = data.get("password")
-    confirmPassword = data.get("confirmPassword")
-    name = data.get("name")
-
-    if password != confirmPassword:
-        return jsonify({"error": "Passwords must match"}), 400
-    
-    # Anslut till databasen
-    connection = get_db_connection()
-    if connection is None:
-        return jsonify({"error": "Databasanslutning misslyckades"}), 500
-    
-    try:
-        # Kontrollera om användaren redan är registrerad i databasen
-        # Om användaren inte finns så sätt sessionsvariabler och skicka tillbaka en hälsning med användarens namn.
-        cursor = connection.cursor(dictionary=True)
-        query = "SELECT id FROM users WHERE username = %s"
-        cursor.execute(query, (username,))
-        user = cursor.fetchone()
-
-        if user:
-            return jsonify({"error": "Användarnamnet är redan registrerat"}), 409
-
-        hashed_password = generate_password_hash(password)
-        query = """
-            INSERT INTO users (username, name, password)
-            VALUES (%s, %s, %s)
-        """
-        cursor.execute(query, (username, name, hashed_password))
-        connection.commit()
-
-        query = "SELECT id, username FROM users WHERE username = %s"
-        cursor.execute(query, (username,))
-        user = cursor.fetchone()
-        session['user_id'] = user['id']
-        session['username'] = user['username']
-        return jsonify({"message": "success"})
-    except Error as e:
-        print(f"Databasfel: {e}")
-        return jsonify({"error": "Databasfel inträffade"}), 500
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
-
-@app.route('/api/login', methods=['POST'])
+@app.route("/login", methods=["POST"])
 def login():
     data = request.get_json(silent=True)
 
-    if data is None:
-        return jsonify({"error": "Invalid or missing JSON"}), 400
+    if not data:
+        return jsonify({"error": "Felaktig JSON"}), 400
 
     username = data.get("username")
     password = data.get("password")
-    
-    # Anslut till databasen
-    connection = get_db_connection()
-    if connection is None:
-        return jsonify({"error": "Databasanslutning misslyckades"}), 500
-    
-    try:
-        cursor = connection.cursor(dictionary=True)
-        query = "SELECT * FROM users WHERE username = %s"
-        cursor.execute(query, (username,))
-        user = cursor.fetchone()
-        # Kontrollera om användaren fanns i databasen och lösenordet är korrekt.
-        # Om lösenordet är korrekt så sätt sessionsvariabler och skicka tillbaka en hälsning med användarens namn.
-        # Om lösenordet inte är korrekt skicka tillbaka ett felmeddelande med http-status 401.
-        
-        if user and check_password_hash(user['password'], password):
-            # Inloggning lyckades - spara användarinfo i session
-            session['user_id'] = user['id']
-            session['username'] = user['username']
-            return jsonify({"message": "success"})
-        else:
-            # Inloggning misslyckades, skicka http status 401 (Unauthorized)
-            return jsonify({"error": "Ogiltigt användarnamn eller lösenord"}), 401
-    except Error as e:
-        print(f"Databasfel: {e}")
-        return jsonify({"error": "Databasfel inträffade"}), 500
-    finally:
-        if connection.is_connected():
-            cursor.close()
-            connection.close()
 
-@app.route('/api/logout', methods=['POST'])
-def logout():
-    session.clear()
-    return jsonify({"message": "success"})
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+    user = cursor.fetchone()
+    cursor.close()
+    connection.close()
+
+    if user and check_password_hash(user["password"], password):
+        access_token = create_access_token(
+            identity=str(user["id"]),
+            additional_claims={"name": user["name"]}
+        )
+        return jsonify({"token": access_token}), 200
+
+    return jsonify({"error": "Ogiltigt användarnamn eller lösenord"}), 401
+
+@app.route("/users", methods=["POST"])
+def post_user():
+    data = request.get_json(silent=True)
+
+    if not data:
+        return jsonify({"error": "Empty JSON"}), 400
+
+    name = data.get("name")
+    username = data.get("username")
+    password = data.get("password")
+
+    if not name or not username or not password:
+        return jsonify({"error": "Alla fält måste fyllas i"}), 400
+
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+    if cursor.fetchone():
+        return jsonify({"error": "Användarnamn finns redan"}), 409
+
+    hashed_password = generate_password_hash(password)
+    cursor.execute(
+        "INSERT INTO users (username, name, password) VALUES (%s, %s, %s)",
+        (username, name, hashed_password)
+    )
+    connection.commit()
+    cursor.close()
+    connection.close()
+
+    return jsonify({"message": "Användare skapad"}), 201
+
+@app.route("/users", methods=["GET"])
+@jwt_required()
+def get_users():
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    cursor.execute("SELECT id, username, name FROM users")
+    users = cursor.fetchall()
+
+    cursor.close()
+    connection.close()
+
+    return jsonify(users)
+
+@app.route("/users/<int:user_id>", methods=["GET"])
+@jwt_required()
+def get_user(user_id):
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    cursor.execute(
+        "SELECT id, username, name FROM users WHERE id = %s",
+        (user_id,)
+    )
+    user = cursor.fetchone()
+
+    cursor.close()
+    connection.close()
+
+    if not user:
+        return jsonify({"error": "Användaren hittades inte"}), 404
+
+    return jsonify(user)
+
+@app.route("/users/<int:id>", methods=["PUT"])
+@jwt_required()
+def put_user(id):
+    data = request.get_json(silent=True)
+
+    if not data:
+        return jsonify({"error": "Empty JSON"}), 400
+
+    name = data.get("name")
+    username = data.get("username")
+    password = data.get("password")
+
+    if not name or not username or not password:
+        return jsonify({"error": "Alla fält måste fyllas i"}), 400
+
+    connection = get_db_connection()
+    cursor = connection.cursor(dictionary=True)
+
+    cursor.execute("SELECT id FROM users WHERE id = %s", (id,))
+    if not cursor.fetchone():
+        return jsonify({"error": "User not found"}), 404
+
+    hashed_password = generate_password_hash(password)
+    cursor.execute(
+        """
+        UPDATE users
+        SET username = %s, name = %s, password = %s
+        WHERE id = %s
+        """,
+        (username, name, hashed_password, id)
+    )
+    connection.commit()
+
+    cursor.close()
+    connection.close()
+
+    return jsonify({"message": "Användare uppdaterad"}), 200
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, port=5000)

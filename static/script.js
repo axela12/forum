@@ -32,7 +32,7 @@ document.querySelector('#loginButton')?.addEventListener('click', e => {
     });
 });
 
-document.querySelector('#logoutForm')?.addEventListener('submit', e => {
+document.querySelector('#logoutButton')?.addEventListener('click', e => {
     e.preventDefault();
     logout();
 });
@@ -78,16 +78,32 @@ document.querySelector('#registerForm')?.addEventListener('submit', async e => {
     });
 });
 
+let jwt = null
+
+function decodeJWT(token) {
+    try {
+        const payload = token.split('.')[1];
+        const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+        const json = decodeURIComponent(
+        atob(base64)
+            .split('')
+            .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+            .join('')
+        );
+        return JSON.parse(json);
+    } catch (e) {
+        return null;
+    }
+}
+
 async function login() {
-    const csrf_token = await fetch('/api/get_csrf').then(res => res.json()).then(data => data.csrf_token);
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
+    const username = document.querySelector('#username').value;
+    const password = document.querySelector('#password').value;
 
     fetch('/api/login', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'X-CSRF-Token': csrf_token
         },
         body: JSON.stringify({
             username: username,
@@ -105,6 +121,7 @@ async function login() {
             console.error("Login error:", data?.error || `HTTP ${res.status}`);
         } else {
             // Successful login
+            jwt = data.token;
             window.location.href = '/';
         }
     })
@@ -114,13 +131,11 @@ async function login() {
 }
 
 async function logout() {
-    const csrf_token = await fetch('/api/get_csrf').then(res => res.json()).then(data => data.csrf_token);
-
     fetch('/api/logout', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            'X-CSRF-Token': csrf_token
+            'Authorization': `Bearer ${jwt}`
         }
     })
     .then(res => 
@@ -133,7 +148,8 @@ async function logout() {
             // Handle server errors
             console.error("Logout error:", data?.error || `HTTP ${res.status}`);
         } else {
-            // Successful login
+            // Successful logout
+            jwt = null;
             window.location.href = '/';
         }
     })
