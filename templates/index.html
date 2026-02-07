@@ -2,10 +2,6 @@
 
 {% block body %}
     <h1>Welcome to the Home Page</h1>
-
-    {% if session['user_id'] %}
-        <p>Hello, {{ session['username'] }}!</p>
-    {% endif %}
     <p>
         This is the main landing page of the web application.
         feel free to log in or sign up to access more features.

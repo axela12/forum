@@ -9,20 +9,15 @@
     {% endblock %}
 </head>
 <body>
-    <header>
-        <nav>
+    <header class="header">
+        <nav id="nav">
             <a href="/">hem</a>
-            {% if session['user_id'] %}
-                <form id="logoutForm" style="display: inline;">
-                    <input type="submit" value="log out">
-                </form>
-            {% else %}
-                <button id="loginButton">log in</button>
-            {% endif %}
+            <button id="loginButton" class="hidden">log in</button>
+            <button id="logoutButton" class="hidden">log out</button>
         </nav>
     </header>
 
-    <div class="container">
+    <div class="content">
         {% block body %}
         {% endblock %}
     </div>

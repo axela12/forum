@@ -1,6 +1,21 @@
 /* Body font */
 body {
     font-family: Arial, sans-serif;
+    margin: 0;
+}
+
+.header {
+    display: flex;
+    justify-content: flex-start; /* Align items to the left */
+    align-items: center;
+    padding: 10px 20px;
+    height: 60px;
+    background-color: #f0f0f0;
+    gap: 20px; /* Optional: adds spacing between items */
+}
+
+.content {
+    padding: 20px;
 }
 
 /* Overlay */
@@ -82,4 +97,12 @@ body {
 
 button:hover {
     cursor: pointer;
+}
+
+.hidden {
+    display: none;
+}
+
+.error-message {
+    color: red;
 }

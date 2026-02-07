@@ -1,3 +1,135 @@
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+}
+
+async function checkLoggedIn() {
+    return authFetch('/profile', {
+        method: 'GET',
+    })
+    .then(res => res.ok)
+    .catch(() => false);
+}
+
+async function toggleLoginButton() {
+    isLoggedIn = await checkLoggedIn();
+
+    if (isLoggedIn) {
+        document.querySelector('#loginButton')?.classList.add('hidden');
+        document.querySelector('#logoutButton')?.classList.remove('hidden');
+    } else {
+        document.querySelector('#loginButton')?.classList.remove('hidden');
+        document.querySelector('#logoutButton')?.classList.add('hidden');
+    }
+}
+
+async function authFetch(url, options = {}) {
+    options.credentials = "include";
+    options.headers = {
+        "Content-Type": "application/json",
+        "X-CSRF-TOKEN": getCookie("csrf_access_token") || "",
+        ...(options.headers || {})
+    };
+
+    let res = await fetch(url, options);
+
+    if (res.status === 401 && !url.includes("/refresh")) {
+        const refreshRes = await fetch("/refresh", {
+            method: "POST",
+            credentials: "include",
+            headers: {
+                "X-CSRF-TOKEN": getCookie("csrf_refresh_token") || ""
+            }
+        });
+
+        if (!refreshRes.ok) {
+            throw new Error("Session expired");
+        }
+
+        res = await fetch(url, options);
+    }
+
+    return res;
+}
+
+async function login(username, password) {
+    try {
+        const res = await fetch('/login', {
+            method: 'POST',
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ username, password })
+        });
+
+        const data = await res.json().catch(() => null);
+
+        if (!res.ok) {
+            throw new Error(data?.error || "Login failed");
+        }
+
+        window.location.href = "/";
+    } catch (err) {
+        console.error(err.message);
+        if (!document.querySelector('#loginError')) {
+            const p = document.createElement('p');
+            p.id = 'loginError';
+            p.className = 'error-message';
+            p.textContent = err.message || 'Ett fel inträffade vid inloggning';
+            document.querySelector('#loginDiv')?.appendChild(p);
+        }
+    }
+}
+
+async function register(username, password, confirm_password, name) {
+    try {
+        const res = await fetch('/users', {
+            method: 'POST',
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ username, password, confirm_password, name })
+        });
+
+        const data = await res.json().catch(() => null);
+
+        if (!res.ok) {
+            throw new Error(data?.error || "Registration failed");
+        }
+
+        login(username, password);
+        window.location.href = "/";
+    } catch (err) {
+        console.error(err.message);
+        if (!document.querySelector('#registerError')) {
+            const p = document.createElement('p');
+            p.id = 'registerError';
+            p.className = 'error-message';
+            p.textContent = err.message || 'Ett fel inträffade vid registrering';
+            document.querySelector('#registerDiv')?.appendChild(p);
+        }
+    }
+}
+
+async function logout() {
+    try {
+        const res = await authFetch('/logout', {
+            method: 'POST'
+        });
+
+        const data = await res.json().catch(() => null);
+
+        if (!res.ok) {
+            throw new Error(data?.error || "Logout failed");
+        }
+
+        window.location.href = "/";
+    } catch (err) {
+        console.error(err.message);
+    }
+}
+
 document.querySelector('#loginButton')?.addEventListener('click', e => {
     e.preventDefault();
 
@@ -5,6 +137,7 @@ document.querySelector('#loginButton')?.addEventListener('click', e => {
     overlay.classList.add('auth-overlay');
 
     let div = document.createElement('div');
+    div.id = 'loginDiv';
     div.classList.add('auth');
     div.innerHTML = `
         <button type="button" id="closeButton">&times;</button>
@@ -12,7 +145,7 @@ document.querySelector('#loginButton')?.addEventListener('click', e => {
         <form class="form-column" id="loginForm">
             <input type="text" id="username" placeholder="Username" required>
             <input type="password" id="password" placeholder="Password" required>
-            <button type="submit">Log In</button>
+            <button type="submit" id="loginSubmitButton">Log In</button>
             <a href="/register">Don't have an account? Register</a>
         </form>
     `;
@@ -28,8 +161,23 @@ document.querySelector('#loginButton')?.addEventListener('click', e => {
 
     div.querySelector('#loginForm').addEventListener('submit', e => {
         e.preventDefault();
-        login();
+
+        const username = document.querySelector('#username').value;
+        const password = document.querySelector('#password').value;
+
+        login(username, password);
     });
+});
+
+document.querySelector('#registerForm')?.addEventListener('submit', async e => {
+    e.preventDefault();
+
+    const username = document.getElementById('username').value;
+    const password = document.getElementById('password').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+    const name = document.getElementById('name').value;
+    
+    register(username, password, confirmPassword, name);
 });
 
 document.querySelector('#logoutButton')?.addEventListener('click', e => {
@@ -37,123 +185,4 @@ document.querySelector('#logoutButton')?.addEventListener('click', e => {
     logout();
 });
 
-document.querySelector('#registerForm')?.addEventListener('submit', async e => {
-    e.preventDefault();
-
-    const csrf_token = await fetch('/api/get_csrf').then(res => res.json()).then(data => data.csrf_token);
-    const username = document.getElementById('username').value;
-    const password = document.getElementById('password').value;
-    const confirmPassword = document.getElementById('confirmPassword').value;
-    const name = document.getElementById('name').value;
-
-    fetch('/api/login', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrf_token
-        },
-        body: JSON.stringify({
-                'username': username,
-                'password': password,
-                'confirmPassword': confirmPassword,
-                'name': name
-        })
-    })
-    .then(res => 
-        res.json()
-        .catch(() => null) // safely parse JSON
-        .then(data => ({ res, data })) // pass both response and data down the chain
-    )
-    .then(({ res, data }) => {
-        if (!res.ok) {
-            // Handle server errors
-            console.error("Login error:", data?.error || `HTTP ${res.status}`);
-        } else {
-            // Successful login
-            window.location.href = '/';
-        }
-    })
-    .catch(error => {
-        console.error("Error:", error);
-    });
-});
-
-let jwt = null
-
-function decodeJWT(token) {
-    try {
-        const payload = token.split('.')[1];
-        const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
-        const json = decodeURIComponent(
-        atob(base64)
-            .split('')
-            .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-            .join('')
-        );
-        return JSON.parse(json);
-    } catch (e) {
-        return null;
-    }
-}
-
-async function login() {
-    const username = document.querySelector('#username').value;
-    const password = document.querySelector('#password').value;
-
-    fetch('/api/login', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-            username: username,
-            password: password
-        })
-    })
-    .then(res => 
-        res.json()
-        .catch(() => null) // safely parse JSON
-        .then(data => ({ res, data })) // pass both response and data down the chain
-    )
-    .then(({ res, data }) => {
-        if (!res.ok) {
-            // Handle server errors
-            console.error("Login error:", data?.error || `HTTP ${res.status}`);
-        } else {
-            // Successful login
-            jwt = data.token;
-            window.location.href = '/';
-        }
-    })
-    .catch(error => {
-        console.error("Error:", error);
-    });
-}
-
-async function logout() {
-    fetch('/api/logout', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${jwt}`
-        }
-    })
-    .then(res => 
-        res.json()
-        .catch(() => null) // safely parse JSON
-        .then(data => ({ res, data })) // pass both response and data down the chain
-    )
-    .then(({ res, data }) => {
-        if (!res.ok) {
-            // Handle server errors
-            console.error("Logout error:", data?.error || `HTTP ${res.status}`);
-        } else {
-            // Successful logout
-            jwt = null;
-            window.location.href = '/';
-        }
-    })
-    .catch(error => {
-        console.error("Error:", error);
-    });
-}
+window.addEventListener('load', toggleLoginButton);
