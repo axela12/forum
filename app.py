@@ -16,9 +16,12 @@ app.config["JWT_SECRET_KEY"] = "super-secret"
 app.config["JWT_TOKEN_LOCATION"] = ["cookies"]
 app.config["JWT_ACCESS_COOKIE_NAME"] = "access_token"
 app.config["JWT_REFRESH_COOKIE_NAME"] = "refresh_token"
-app.config["JWT_COOKIE_SECURE"] = False # HTTPS only (False for local dev)
-app.config["JWT_COOKIE_SAMESITE"] = "Lax" # or "None"
+app.config["JWT_COOKIE_HTTPONLY"] = True
+app.config["JWT_COOKIE_SECURE"] = False # True in production with HTTPS
+app.config["JWT_COOKIE_SAMESITE"] = "Lax" # or "None" if cross-site
 app.config["JWT_COOKIE_CSRF_PROTECT"] = True
+
+# Token settings
 app.config["JWT_ALGORITHM"] = "HS256"
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(minutes=30)
 app.config["JWT_REFRESH_TOKEN_EXPIRES"] = timedelta(days=30)
@@ -30,6 +33,14 @@ CORS(
 )
 jwt = JWTManager(app)
 socketio = SocketIO(app)
+
+@jwt.unauthorized_loader
+def custom_unauthorized(err_str):
+    return jsonify({"error": "Ej inloggad"}), 401
+
+@jwt.expired_token_loader
+def expired_token_callback(jwt_header, jwt_payload):
+    return jsonify({"error": "Token har gått ut, vänligen logga in igen"}), 401
 
 DB_CONFIG = {
     'host': 'localhost',
@@ -45,10 +56,6 @@ def get_db_connection():
     except Error as e:
         print(f"Fel vid anslutning till MySQL: {e}")
         return None
-
-@jwt.expired_token_loader
-def expired_token_callback(jwt_header, jwt_payload):
-    return jsonify({"error": "Token har gått ut, vänligen logga in igen"}), 401
 
 #index.html
 @app.route('/', methods = ['GET'])
@@ -138,21 +145,31 @@ def post_user():
 
     return jsonify({"message": "Användare skapad"}), 201
 
-#profil
+@app.route("/logout", methods=["POST"])
+@jwt_required(verify_type=False)
+def logout():
+    response = jsonify({"message": "Utloggad"})
+    unset_jwt_cookies(response)
+    return response, 200
+
+@app.route("/refresh", methods=["POST"])
+@jwt_required(refresh=True)
+def refresh():
+    identity = get_jwt_identity()
+    access_token = create_access_token(identity=identity)
+    response = jsonify({"message": "Förnyad access token"})
+    set_access_cookies(response, access_token)
+    return response
+
 @app.route("/profile", methods=["GET"])
-@jwt_required(optional=True)
+@jwt_required()
 def profile():
-    if get_jwt_identity():
-        fetch = request.args.get('fetch', default='')
-        if fetch == 'all':
-            claims = get_jwt()
-            return jsonify({
-                "user_id": get_jwt_identity(),
-                "username": claims.get('username'),
-                "name": claims.get('name')
-            }), 200
-        return jsonify({"user_id": get_jwt_identity()}), 200
-    return jsonify({"error": "Inte inloggad"}), 401
+    claims = get_jwt()
+    return jsonify({
+        "user_id": get_jwt_identity(),
+        "username": claims.get('username'),
+        "name": claims.get('name')
+    }), 200
 
 @app.route("/users", methods=["GET"])
 @jwt_required()
@@ -225,22 +242,6 @@ def put_user(id):
     connection.close()
 
     return jsonify({"message": "Användare uppdaterad"}), 200
-
-@app.route("/logout", methods=["POST"])
-@jwt_required(verify_type=False)
-def logout():
-    response = jsonify({"message": "Utloggad"})
-    unset_jwt_cookies(response)
-    return response, 200
-
-@app.route("/refresh", methods=["POST"])
-@jwt_required(refresh=True)
-def refresh():
-    identity = get_jwt_identity()
-    access_token = create_access_token(identity=identity)
-    response = jsonify({"message": "Förnyad access token"})
-    set_access_cookies(response, access_token)
-    return response
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, port=5000)

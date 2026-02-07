@@ -2,33 +2,14 @@ function getCookie(name) {
   const value = `; ${document.cookie}`;
   const parts = value.split(`; ${name}=`);
   if (parts.length === 2) return parts.pop().split(';').shift();
-}
-
-async function checkLoggedIn() {
-    return authFetch('/profile', {
-        method: 'GET',
-    })
-    .then(res => res.ok)
-    .catch(() => false);
-}
-
-async function toggleLoginButton() {
-    isLoggedIn = await checkLoggedIn();
-
-    if (isLoggedIn) {
-        document.querySelector('#loginButton')?.classList.add('hidden');
-        document.querySelector('#logoutButton')?.classList.remove('hidden');
-    } else {
-        document.querySelector('#loginButton')?.classList.remove('hidden');
-        document.querySelector('#logoutButton')?.classList.add('hidden');
-    }
+  return null;
 }
 
 async function authFetch(url, options = {}) {
     options.credentials = "include";
     options.headers = {
         "Content-Type": "application/json",
-        "X-CSRF-TOKEN": getCookie("csrf_access_token") || "",
+        "X-CSRF-TOKEN": getCookie("csrf_access_token"),
         ...(options.headers || {})
     };
 
@@ -39,7 +20,7 @@ async function authFetch(url, options = {}) {
             method: "POST",
             credentials: "include",
             headers: {
-                "X-CSRF-TOKEN": getCookie("csrf_refresh_token") || ""
+                "X-CSRF-TOKEN": getCookie("csrf_refresh_token")
             }
         });
 
@@ -55,7 +36,7 @@ async function authFetch(url, options = {}) {
 
 async function login(username, password) {
     try {
-        const res = await fetch('/login', {
+        const res = await authFetch('/login', {
             method: 'POST',
             headers: {
                 "Content-Type": "application/json",
@@ -84,7 +65,7 @@ async function login(username, password) {
 
 async function register(username, password, confirm_password, name) {
     try {
-        const res = await fetch('/users', {
+        const res = await authFetch('/users', {
             method: 'POST',
             headers: {
                 "Content-Type": "application/json",
@@ -115,7 +96,7 @@ async function register(username, password, confirm_password, name) {
 async function logout() {
     try {
         const res = await authFetch('/logout', {
-            method: 'POST'
+            method: 'POST',
         });
 
         const data = await res.json().catch(() => null);
@@ -185,4 +166,26 @@ document.querySelector('#logoutButton')?.addEventListener('click', e => {
     logout();
 });
 
-window.addEventListener('load', toggleLoginButton);
+async function checkProfile() {
+    return fetch('/profile', {
+        method: 'GET',
+        credentials: 'include'
+    })
+    .then(res => res.ok ? res.json() : null)
+    .catch(() => null);
+}
+
+window.addEventListener('load', async () => {
+    const data = await checkProfile();
+
+    if (data) {
+        document.querySelector('#loginButton')?.classList.add('hidden');
+        document.querySelector('#logoutButton')?.classList.remove('hidden');
+
+        document.querySelector('#profileName').textContent = data.username;
+        document.querySelector('#profileName')?.classList.remove('hidden');
+    } else {
+        document.querySelector('#loginButton')?.classList.remove('hidden');
+        document.querySelector('#logoutButton')?.classList.add('hidden');
+    }
+});
