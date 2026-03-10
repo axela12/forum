@@ -1,16 +1,18 @@
 {% extends "base.html" %}
 
 {% block body %}
-    <h1>Welcome to the Home Page</h1>
+    <h1>Thread</h1>
+    <h2 id="thread-title">{{ thread_title }}</h2>
 
-    <form id="new-thread-form"></form>
+    <form id="new-post-form"></form>
 
-    <div id="threads-container">
-        <!-- Threads will be loaded here -->
+    <div id="posts-container">
+        <!-- Posts will be loaded here -->
     </div>
 
     <form id="pagination-form">
-        <label for="limit">Threads per page:</label>
+        <input type="hidden" id="thread-id" value="{{ thread_id }}">
+        <label for="limit">Posts per page:</label>
         <select id="limit" name="limit">
             <option value="10" selected>10</option>
             <option value="20">20</option>
@@ -27,11 +29,12 @@
     let lastCreatedAt = null;
     let lastId = null;
     let stack = [];  // Keep track of previous pages for "Previous" button
-    const container = document.getElementById('threads-container');
+    const container = document.getElementById('posts-container');
 
-    async function getThreads(limit, lastCreatedAt = null, lastId = null) {
+    async function getPosts(limit, lastCreatedAt = null, lastId = null) {
         try {
-            let url = `/threads?limit=${limit}`;
+            let threadId = document.getElementById('thread-id').value;
+            let url = `/threads/${threadId}?limit=${limit}`;
             if (lastCreatedAt && lastId) {
                 url += `&last_created_at=${encodeURIComponent(lastCreatedAt)}&last_id=${lastId}`;
             }
@@ -56,60 +59,58 @@
         }
     }
 
-    function renderThreads(threads) {
+    function renderPosts(posts) {
         container.innerHTML = '';
-        if (!threads.length) {
-            container.innerHTML = '<p>No threads found.</p>';
+        if (!posts.length) {
+            container.innerHTML = '<p>No posts found.</p>';
             return;
         }
 
-        threads.forEach(thread => {
+        posts.forEach(post => {
             const div = document.createElement('div');
-            div.innerHTML = `<strong>${thread.title}</strong> by ${thread.username} <small>${thread.created_at}</small>`;
+            div.innerHTML = `<strong>${post.content}</strong> by ${post.username} <small>${post.created_at}</small>`;
             container.appendChild(div);
         });
     }
 
     // Initial load
     document.addEventListener('DOMContentLoaded', async () => {
-        const newThreadForm = document.getElementById('new-thread-form');
+        const newPostForm = document.getElementById('new-post-form');
         if (localStorage.getItem('access_token')) {
-            newThreadForm.innerHTML = `
-                <input type="text" id="thread-title" placeholder="Thread title" required>
-                <textarea id="thread-content" placeholder="Thread content" required></textarea>
-                <button type="submit">Create Thread</button>
+            newPostForm.innerHTML = `
+                <textarea id="post-content" placeholder="Write your post here..." required></textarea>
+                <button type="submit">Create Post</button>
             `;
         } else {
-            newThreadForm.innerHTML = '<p>Please log in to create a thread.</p>';
+            newPostForm.innerHTML = '<p>Please log in to create a post.</p>';
         }
         const limit = parseInt(document.getElementById('limit').value);
-        const threads = await getThreads(limit);
-        renderThreads(threads);
+        const posts = await getPosts(limit);
+        renderPosts(posts);
 
-        if (threads.length) {
-            lastCreatedAt = threads[threads.length - 1].created_at;
-            lastId = threads[threads.length - 1].id;
+        if (posts.length) {
+            lastCreatedAt = posts[posts.length - 1].created_at;
+            lastId = posts[posts.length - 1].id;
             stack.push({lastCreatedAt, lastId});  // save for "Previous"
         }
     });
 
-    document.getElementById('new-thread-form')?.addEventListener('submit', async (e) => {
+    document.getElementById('new-post-form')?.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const title = document.getElementById('thread-title').value.trim();
-        const content = document.getElementById('thread-content').value.trim();
-        if (!title || !content) return;
-        create_thread(title, content);
+        const content = document.getElementById('post-content').value.trim();
+        if (!content) return;
+        create_post(document.getElementById('thread-id').value, content);
     });
 
     // Next button
     document.getElementById('next').addEventListener('click', async () => {
         const limit = parseInt(document.getElementById('limit').value);
-        const threads = await getThreads(limit, lastCreatedAt, lastId);
+        const posts = await getPosts(limit, lastCreatedAt, lastId);
 
-        if (threads.length) {
-            renderThreads(threads);
-            lastCreatedAt = threads[threads.length - 1].created_at;
-            lastId = threads[threads.length - 1].id;
+        if (posts.length) {
+            renderPosts(posts);
+            lastCreatedAt = posts[posts.length - 1].created_at;
+            lastId = posts[posts.length - 1].id;
             stack.push({lastCreatedAt, lastId});
             document.getElementById('prev').disabled = stack.length <= 1;
         }
@@ -123,11 +124,11 @@
         const prev = stack[stack.length - 1];  // last page
         const limit = parseInt(document.getElementById('limit').value);
 
-        const threads = await getThreads(limit, prev.lastCreatedAt, prev.lastId);
-        renderThreads(threads);
+        const posts = await getPosts(limit, prev.lastCreatedAt, prev.lastId);
+        renderPosts(posts);
 
-        lastCreatedAt = threads[threads.length - 1]?.created_at || null;
-        lastId = threads[threads.length - 1]?.id || null;
+        lastCreatedAt = posts[posts.length - 1]?.created_at || null;
+        lastId = posts[posts.length - 1]?.id || null;
         document.getElementById('prev').disabled = stack.length <= 1;
     });
     </script>

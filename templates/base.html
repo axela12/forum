@@ -5,25 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Web Page</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     {% block head %}
     {% endblock %}
 </head>
 <body>
-    <header class="header">
-        <nav id="nav">
-            <a href="/">hem</a>
-            <button id="loginButton" class="hidden">log in</button>
-            <button id="logoutButton" class="hidden">log out</button>
-            <span id="profileName" class="hidden"></span>
-        </nav>
-    </header>
+    <div id="header" class="header">
+        <a href="/">Hem</a>
+    </div>
 
     <div class="content">
         {% block body %}
         {% endblock %}
     </div>
 
-
     <script src="{{ url_for('static', filename='script.js') }}"></script>
+    {% block scripts %}
+    {% endblock %}
 </body>
 </html>
