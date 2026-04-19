@@ -1,12 +1,12 @@
 from functools import wraps
 from flask import Flask, render_template, request, jsonify, abort
-from datetime import timedelta
+from datetime import datetime, timedelta
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from mysql.connector import Error, connect
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_jwt_extended import (
-    JWTManager, jwt_required, get_jwt_identity, get_jwt, create_access_token
+    JWTManager, jwt_required, get_jwt_identity, get_jwt, create_access_token, decode_token
 )
 
 app = Flask(__name__)
@@ -15,10 +15,10 @@ app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(minutes=30)
 CORS(
     app,
     supports_credentials=True,
-    origins=["http://localost:5000"]
+    origins=["http://localost:5000", "http://10.32.37.5:5000"]
 )
 jwt = JWTManager(app)
-socketio = SocketIO(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 DB_CONFIG = {
     'host': 'localhost',
@@ -90,7 +90,7 @@ def login():
         return jsonify({"error": "Databasfel inträffade"}), 500
 
     finally:
-        if connection.is_connected():
+        if connection and connection.is_connected():
             cursor.close()
             connection.close()
 
@@ -141,7 +141,7 @@ def post_user():
         return jsonify({"error": "Databasfel inträffade"}), 500
 
     finally:
-        if connection.is_connected():
+        if connection and connection.is_connected():
             cursor.close()
             connection.close()
 
@@ -162,7 +162,7 @@ def get_users():
         return jsonify({"error": "Databasfel inträffade"}), 500
 
     finally:
-        if connection.is_connected():
+        if connection and connection.is_connected():
             cursor.close()
             connection.close()
 
@@ -189,28 +189,27 @@ def get_user(user_id):
         return jsonify({"error": "Databasfel inträffade"}), 500
 
     finally:
-        if connection.is_connected():
+        if connection and connection.is_connected():
             cursor.close()
             connection.close()
 
 @app.route("/users/<int:id>", methods=["PUT"])
-@jwt_required()
+@role_required("admin")
 def put_user(id):
     try:
-        data = request.get_json()
-        email = data.get("email")
-        username = data.get("username")
-        password = data.get("password")
-
-        if not email or not username or not password:
-            return jsonify({"error": "Alla fält måste fyllas i"}), 400
-
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
-        cursor.execute("SELECT id FROM users WHERE id = %s", (id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT id, username, password, email FROM users WHERE id = %s", (id,))
+        user = cursor.fetchone()
+
+        if not user:
             return jsonify({"error": "Användaren hittades inte"}), 404
+        
+        data = request.get_json()
+        email = data.get("email", user["email"])
+        username = data.get("username", user["username"])
+        password = data.get("password", user["password"])
 
         hashed_password = generate_password_hash(password)
         cursor.execute(
@@ -230,15 +229,14 @@ def put_user(id):
         return jsonify({"error": "Databasfel inträffade"}), 500
 
     finally:
-        if connection.is_connected():
+        if connection and connection.is_connected():
             cursor.close()
             connection.close()
 
 @app.route("/threads", methods=["GET"])
-@jwt_required()
 def get_threads():
     try:
-        limit = request.args.get("limit", default=20, type=int)
+        limit = request.args.get("limit", default=10, type=int)
         last_post_at = request.args.get("last_post_at")
         last_id = request.args.get("last_id")
 
@@ -251,19 +249,22 @@ def get_threads():
                     t.id,
                     t.title,
                     t.post_count,
+                    t.last_post_id,
                     t.last_post_at,
                     COALESCE(u.username,'Deleted user') AS username
                 FROM threads t
                 LEFT JOIN users u ON t.user_id = u.id
-                ORDER BY t.last_post_at DESC, t.id DESC
+                ORDER BY t.last_post_at DESC, t.post_count DESC, t.id DESC
                 LIMIT %s
             """, (limit,))
         else:
+            last_post_at = datetime.strptime(last_post_at, "%a, %d %b %Y %H:%M:%S %Z")
             cursor.execute("""
                 SELECT
                     t.id,
                     t.title,
                     t.post_count,
+                    t.last_post_id,
                     t.last_post_at,
                     COALESCE(u.username,'Deleted user') AS username
                 FROM threads t
@@ -272,11 +273,15 @@ def get_threads():
                     t.last_post_at < %s
                     OR (t.last_post_at = %s AND t.id < %s)
                 )
-                ORDER BY t.last_post_at DESC, t.id DESC
+                ORDER BY t.last_post_at DESC, t.post_count DESC, t.id DESC
                 LIMIT %s
             """, (last_post_at, last_post_at, last_id, limit))
-
+            
         threads = cursor.fetchall()
+
+        for thread in threads:
+            if thread.get("last_post_at"):
+                thread["last_post_at"] = thread["last_post_at"].isoformat()
 
         return jsonify(threads)
     
@@ -285,7 +290,7 @@ def get_threads():
         return jsonify({"error": "Databasfel inträffade"}), 500
 
     finally:
-        if connection.is_connected():
+        if connection and connection.is_connected():
             cursor.close()
             connection.close()
 
@@ -296,43 +301,80 @@ def post_thread():
         data = request.get_json()
         title = data.get("title")
         content = data.get("content")
-        user_id = data.get("user_id")
+        user_id = get_jwt_identity()
 
-        if not title or not content or not user_id:
+        if not title or not content:
             return jsonify({"error": "Alla fält måste fyllas i"}), 400
 
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
+        connection.start_transaction()
+
         cursor.execute(
             "INSERT INTO threads (user_id, title) VALUES (%s, %s)",
             (user_id, title)
         )
-        connection.commit()
+        thread_id = cursor.lastrowid
 
         cursor.execute(
-            "SELECT id FROM threads WHERE user_id = %s AND title = %s",
-            (user_id, title)
+            "INSERT INTO posts (thread_id, user_id, content) VALUES (%s, %s, %s)",
+            (thread_id, user_id, content)
+        )
+        post_id = cursor.lastrowid
+
+        cursor.execute(
+            "SELECT id, created_at FROM posts WHERE id = %s",
+            (post_id,)
+        )
+        latest_post = cursor.fetchone()
+
+        cursor.execute(
+            """UPDATE threads
+               SET last_post_id = %s,
+                    last_post_at = %s,
+                    post_count = post_count + 1
+               WHERE id = %s""",
+            (latest_post["id"], latest_post["created_at"], thread_id)
         )
 
+        cursor.execute("""
+            SELECT t.id, t.title, t.post_count, t.last_post_at,
+                COALESCE(u.username,'Deleted user') AS username
+            FROM threads t
+            LEFT JOIN users u ON t.user_id = u.id
+            WHERE t.id = %s
+        """, (thread_id,))
         thread = cursor.fetchone()
 
-        return jsonify({"id": thread["id"]})
-    
+        connection.commit()
+
+        room = "threads"
+        socketio.emit('new_thread', {
+            "id": thread["id"],
+            "title": thread["title"],
+            "username": thread["username"],
+            "post_count": thread["post_count"],
+            "last_post_at": thread["last_post_at"].isoformat()
+        }, room=room)
+
+        return jsonify({"id": thread_id}), 201
+
     except Error as e:
+        if connection:
+            connection.rollback()
         print(f"Databasfel: {e}")
         return jsonify({"error": "Databasfel inträffade"}), 500
 
     finally:
-        if connection.is_connected():
+        if connection and connection.is_connected():
             cursor.close()
             connection.close()
 
 @app.route("/threads/<int:thread_id>", methods=["GET"])
-@jwt_required()
 def get_thread(thread_id):
     try:
-        limit = request.args.get("limit", default=20, type=int)
+        limit = request.args.get("limit", default=10, type=int)
         last_created_at = request.args.get("last_created_at")
         last_id = request.args.get("last_id")
 
@@ -341,7 +383,7 @@ def get_thread(thread_id):
 
         cursor.execute("""
             SELECT t.id, t.title, t.post_count, t.last_post_at,
-                   COALESCE(u.username,'Deleted user') AS username
+                COALESCE(u.username,'Deleted user') AS username
             FROM threads t
             LEFT JOIN users u ON t.user_id = u.id
             WHERE t.id = %s
@@ -354,40 +396,143 @@ def get_thread(thread_id):
         if not last_created_at or not last_id:
             cursor.execute("""
                 SELECT p.id, p.content, p.created_at,
-                       COALESCE(u.username,'Deleted user') AS username
+                    COALESCE(u.username,'Deleted user') AS username
                 FROM posts p
                 LEFT JOIN users u ON p.user_id = u.id
                 WHERE p.thread_id = %s
-                ORDER BY p.created_at ASC, p.id ASC
+                ORDER BY p.created_at DESC, p.id DESC
                 LIMIT %s
             """, (thread_id, limit))
         else:
+            last_created_at = datetime.strptime(last_created_at, "%a, %d %b %Y %H:%M:%S %Z")
             cursor.execute("""
                 SELECT p.id, p.content, p.created_at,
-                       COALESCE(u.username,'Deleted user') AS username
+                    COALESCE(u.username,'Deleted user') AS username
                 FROM posts p
                 LEFT JOIN users u ON p.user_id = u.id
                 WHERE p.thread_id = %s
-                  AND (p.created_at > %s OR (p.created_at = %s AND p.id > %s))
-                ORDER BY p.created_at ASC, p.id ASC
+                    AND (p.created_at > %s OR (p.created_at = %s AND p.id > %s))
+                ORDER BY p.created_at DESC, p.id DESC
                 LIMIT %s
             """, (thread_id, last_created_at, last_created_at, last_id, limit))
 
         posts = cursor.fetchall()
 
-        return jsonify({
-            "thread": thread,
-            "posts": posts
-        })
+        for post in posts:
+            if post.get("created_at"):
+                post["created_at"] = post["created_at"].isoformat()
+
+        return jsonify(posts)
     
     except Error as e:
         print(f"Databasfel: {e}")
         return jsonify({"error": "Databasfel inträffade"}), 500
 
     finally:
-        if connection.is_connected():
+        if connection and connection.is_connected():
             cursor.close()
             connection.close()
+
+@app.route("/threads/<int:thread_id>", methods=["POST"])
+@jwt_required()
+def post_post(thread_id):
+    try:
+        data = request.get_json()
+        content = data.get("content")
+        user_id = get_jwt_identity()
+
+        if not content:
+            return jsonify({"error": "Alla fält måste fyllas i"}), 400
+
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        connection.start_transaction()
+
+        cursor.execute(
+            "INSERT INTO posts (thread_id, user_id, content) VALUES (%s, %s, %s)",
+            (thread_id, user_id, content)
+        )
+        post_id = cursor.lastrowid
+
+        cursor.execute(
+            "SELECT id, created_at FROM posts WHERE id = %s",
+            (post_id,)
+        )
+        latest_post = cursor.fetchone()
+
+        cursor.execute(
+            """UPDATE threads
+               SET last_post_id = %s,
+                    last_post_at = %s,
+                    post_count = post_count + 1
+               WHERE id = %s""",
+            (latest_post["id"], latest_post["created_at"], thread_id)
+        )
+
+        cursor.execute(
+            "SELECT post_count, last_post_id, last_post_at FROM threads WHERE id = %s",
+            (thread_id,)
+        )
+        updated_thread = cursor.fetchone()
+
+        cursor.execute("""
+            SELECT p.content, p.created_at,
+                COALESCE(u.username,'Deleted user') AS username
+            FROM posts p
+            LEFT JOIN users u ON p.user_id = u.id
+            WHERE p.id = %s
+        """, (post_id,))
+        post = cursor.fetchone()
+
+        connection.commit()
+
+        room = f"thread_{thread_id}"
+        socketio.emit('new_post', {
+            "id": post_id,
+            "thread_id": thread_id,
+            "post_count": updated_thread["post_count"],
+            "username": post["username"],
+            "content": post["content"],
+            "created_at": post["created_at"].isoformat()
+        }, room=room)
+
+        room = "threads"
+        socketio.emit('new_post', {
+            "id": thread_id,
+            "post_count": updated_thread["post_count"],
+            "last_post_id": updated_thread["last_post_id"],
+            "last_post_at": updated_thread["last_post_at"].isoformat()
+        }, room=room)
+
+        return jsonify({"post_id": post_id}), 201
+
+    except Exception as e:
+        if connection:
+            connection.rollback()
+        print(f"Databasfel: {e}")
+        return jsonify({"error": "Databasfel inträffade"}), 500
+
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+@socketio.on('join_room')
+def handle_join_room(data):
+    room = data.get('room')
+    if not room:
+        return
+    
+    join_room(room)
+
+@socketio.on('leave_room')
+def handle_leave_room(data):
+    room = data.get('room')
+    if not room:
+        return
+
+    leave_room(room)
 
 # index
 @app.route('/', methods = ['GET'])
@@ -411,7 +556,7 @@ def forum_thread(thread_id):
         if not thread:
             return abort(404, description="Thread not found")
         
-        return render_template('thread.html', thread_id = thread["id"], thread_title = thread["title"])
+        return render_template('thread.html', thread_title = thread["title"])
     finally:
         if connection.is_connected():
             cursor.close()

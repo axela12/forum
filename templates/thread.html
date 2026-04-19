@@ -1,17 +1,19 @@
 {% extends "base.html" %}
 
 {% block body %}
-    <h1>Thread</h1>
-    <h2 id="thread-title">{{ thread_title }}</h2>
+    <h3 id="thread-title">{{ thread_title }}</h3>
 
-    <form id="new-post-form"></form>
+    <form id="new-post-form">
+        <p>Loading new-post-form...</p>
+    </form>
 
-    <div id="posts-container">
-        <!-- Posts will be loaded here -->
+    <span id="new-post-count"></span>
+
+    <div id="posts-container" class="container">
+        <p>Loading posts...</p>
     </div>
 
     <form id="pagination-form">
-        <input type="hidden" id="thread-id" value="{{ thread_id }}">
         <label for="limit">Posts per page:</label>
         <select id="limit" name="limit">
             <option value="10" selected>10</option>
@@ -19,117 +21,228 @@
             <option value="50">50</option>
         </select>
 
+        <button type="button" id="first" disabled>First</button>
         <button type="button" id="prev" disabled>Previous Page</button>
-        <button type="button" id="next">Next Page</button>
+        <span id="page-info">Page 1</span>
+        <button type="button" id="next" disabled>Next Page</button>
     </form>
 {% endblock %}
 
 {% block scripts %}
     <script>
-    let lastCreatedAt = null;
-    let lastId = null;
-    let stack = [];  // Keep track of previous pages for "Previous" button
-    const container = document.getElementById('posts-container');
+        let stack = [];
+        let pageCache = [];
+        let currentPage = 0;
+        const container = document.getElementById('posts-container');
+        const threadId = window.location.pathname.split("/").pop();
+        let newPostsCount = 0;
 
-    async function getPosts(limit, lastCreatedAt = null, lastId = null) {
-        try {
-            let threadId = document.getElementById('thread-id').value;
-            let url = `/threads/${threadId}?limit=${limit}`;
-            if (lastCreatedAt && lastId) {
-                url += `&last_created_at=${encodeURIComponent(lastCreatedAt)}&last_id=${lastId}`;
+        function updatePageInfo() {
+            document.getElementById('page-info').textContent = `Page ${currentPage + 1}`;
+        }
+
+        async function getPosts(limit, last_created_at = null, lastId = null) {
+            try {
+                let url = `/threads/${threadId}?limit=${limit}`;
+                if (last_created_at) url += `&last_created_at=${encodeURIComponent(last_created_at)}`;
+                if (lastId) url += `&last_id=${encodeURIComponent(lastId)}`;
+
+                container.innerHTML = '<p>Loading...</p>';
+
+                const res = await fetch(url);
+
+                if (!res.ok) {
+                    const data = await res.json().catch(() => null);
+                    throw new Error(data?.error || "Failed to fetch posts");
+                }
+
+                return await res.json();
+            } catch (err) {
+                console.error(err);
+                return [];
+            }
+        }
+
+        function renderPosts(thread) {
+            container.innerHTML = '';
+            if (!thread.length) {
+                container.innerHTML = '<p>No posts found.</p>';
+                return;
             }
 
-            const res = await fetch(url, {
-                method: 'GET',
-                headers: {
-                    "Authorization": `Bearer ${localStorage.getItem('access_token')}`
-                }
+            thread.forEach(post => {
+                const div = document.createElement('div');
+                div.classList.add('post');
+
+                const header = document.createElement('div');
+                header.classList.add('post-header');
+
+                const username = document.createElement('strong');
+                username.textContent = post.username;
+
+                const created = document.createElement('small');
+                created.textContent = new Date(post.created_at).toLocaleString();
+
+                header.appendChild(username);
+                header.appendChild(created);
+
+                const content = document.createElement('p');
+                content.textContent = post.content;
+
+                div.appendChild(header);
+                div.appendChild(content);
+
+                container.appendChild(div);
             });
 
-            if (!res.ok) {
-                const data = await res.json().catch(() => null);
-                throw new Error(data?.error || "Failed to fetch threads");
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        async function loadFirstPage() {
+            const limit = parseInt(document.getElementById('limit').value);
+
+            const thread = await getPosts(limit);
+
+            pageCache = [thread];
+            stack = [{
+                last_created_at: thread.at(-1)?.created_at || null,
+                lastId: thread.at(-1)?.id || null
+            }];
+            currentPage = 0;
+            newPostsCount = 0;
+            document.getElementById('new-post-count').textContent = '';
+
+            renderPosts(thread);
+
+            document.getElementById('prev').disabled = true;
+            document.getElementById('first').disabled = true;
+            updatePageInfo();
+            document.getElementById('next').disabled = thread.length < limit;
+        }
+
+        window.addEventListener("beforeunload", () => {
+            socket.emit("leave_room", {
+                room: `thread_${threadId}`
+            });
+        });
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const newPostForm = document.getElementById('new-post-form');
+
+            if (localStorage.getItem('access_token')) {
+                newPostForm.innerHTML = `
+                    <textarea id="post-content" placeholder="Write your post here..." required></textarea><br>
+                    <button type="submit">Create Post</button>
+                `;
+
+                newPostForm.addEventListener('submit', async (e) => {
+                    e.preventDefault();
+                    const content = document.getElementById('post-content');
+                    if (!content.value.trim()) return;
+
+                    await createPost(threadId, content.value.trim());
+                    content.value = '';
+                });
+
+            } else {
+                newPostForm.innerHTML = '<p>Please log in to create a post.</p>';
             }
 
-            const threads = await res.json();
-            return threads;
-        } catch (err) {
-            console.error(err);
-            return [];
-        }
-    }
+            const limit = parseInt(document.getElementById('limit').value);
 
-    function renderPosts(posts) {
-        container.innerHTML = '';
-        if (!posts.length) {
-            container.innerHTML = '<p>No posts found.</p>';
-            return;
-        }
+            const thread = await getPosts(limit);
 
-        posts.forEach(post => {
-            const div = document.createElement('div');
-            div.innerHTML = `<strong>${post.content}</strong> by ${post.username} <small>${post.created_at}</small>`;
-            container.appendChild(div);
+            pageCache = [thread];
+            stack = [{
+                last_created_at: thread.at(-1)?.created_at || null,
+                lastId: thread.at(-1)?.id || null
+            }];
+            currentPage = 0;
+
+            renderPosts(thread);
+
+            document.getElementById('first').disabled = true;
+            document.getElementById('prev').disabled = true;
+            updatePageInfo();
+            document.getElementById('next').disabled = thread.length < limit;
+
+            socket.on("connect", () => {
+                socket.emit("join_room", {
+                    room: `thread_${threadId}`
+                });
+            });
+
+            socket.on("new_post", (post) => {
+                if (currentPage === 0) {
+                    if (!thread.some(p => p.id === post.id)) {
+                        thread.unshift(post);
+                    }
+
+                    if (thread.length > limit) {
+                        thread.pop();
+                    }
+
+                    renderPosts(thread);
+                } else {
+                    newPostsCount++;
+                    document.getElementById('new-post-count').textContent = `New posts: ${newPostsCount}`;
+                }
+            });
         });
-    }
 
-    // Initial load
-    document.addEventListener('DOMContentLoaded', async () => {
-        const newPostForm = document.getElementById('new-post-form');
-        if (localStorage.getItem('access_token')) {
-            newPostForm.innerHTML = `
-                <textarea id="post-content" placeholder="Write your post here..." required></textarea>
-                <button type="submit">Create Post</button>
-            `;
-        } else {
-            newPostForm.innerHTML = '<p>Please log in to create a post.</p>';
-        }
-        const limit = parseInt(document.getElementById('limit').value);
-        const posts = await getPosts(limit);
-        renderPosts(posts);
+        document.getElementById('new-post-count').addEventListener('click', loadFirstPage);
+        document.getElementById('limit').addEventListener('change', loadFirstPage);
+        document.getElementById('first').addEventListener('click', loadFirstPage);
 
-        if (posts.length) {
-            lastCreatedAt = posts[posts.length - 1].created_at;
-            lastId = posts[posts.length - 1].id;
-            stack.push({lastCreatedAt, lastId});  // save for "Previous"
-        }
-    });
+        document.getElementById('next').addEventListener('click', async () => {
+            const limit = parseInt(document.getElementById('limit').value);
 
-    document.getElementById('new-post-form')?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const content = document.getElementById('post-content').value.trim();
-        if (!content) return;
-        create_post(document.getElementById('thread-id').value, content);
-    });
+            const cursor = stack[currentPage];
 
-    // Next button
-    document.getElementById('next').addEventListener('click', async () => {
-        const limit = parseInt(document.getElementById('limit').value);
-        const posts = await getPosts(limit, lastCreatedAt, lastId);
+            const thread = await getPosts(
+                limit,
+                cursor.last_created_at,
+                cursor.lastId
+            );
 
-        if (posts.length) {
-            renderPosts(posts);
-            lastCreatedAt = posts[posts.length - 1].created_at;
-            lastId = posts[posts.length - 1].id;
-            stack.push({lastCreatedAt, lastId});
-            document.getElementById('prev').disabled = stack.length <= 1;
-        }
-    });
+            if (!thread.length) return;
 
-    // Previous button
-    document.getElementById('prev').addEventListener('click', async () => {
-        if (stack.length <= 1) return;
+            currentPage++;
 
-        stack.pop();  // remove current page
-        const prev = stack[stack.length - 1];  // last page
-        const limit = parseInt(document.getElementById('limit').value);
+            pageCache[currentPage] = thread;
+            stack[currentPage] = {
+                last_created_at: thread.at(-1)?.created_at || null,
+                lastId: thread.at(-1)?.id || null
+            };
 
-        const posts = await getPosts(limit, prev.lastCreatedAt, prev.lastId);
-        renderPosts(posts);
+            renderPosts(thread);
 
-        lastCreatedAt = posts[posts.length - 1]?.created_at || null;
-        lastId = posts[posts.length - 1]?.id || null;
-        document.getElementById('prev').disabled = stack.length <= 1;
-    });
+            document.getElementById('first').disabled = false;
+            document.getElementById('prev').disabled = currentPage === 0;
+            updatePageInfo();
+            document.getElementById('next').disabled = thread.length < limit;
+        });
+
+        document.getElementById('prev').addEventListener('click', () => {
+            if (currentPage === 0) return;
+
+            currentPage--;
+
+            if (currentPage === 0) {
+                newPostsCount = 0;
+                document.getElementById('new-post-count').textContent = '';
+            }
+
+            const thread = pageCache[currentPage];
+
+            renderPosts(thread);
+
+            const limit = parseInt(document.getElementById('limit').value);
+
+            document.getElementById('first').disabled = currentPage === 0;
+            document.getElementById('prev').disabled = currentPage === 0;
+            updatePageInfo();
+            document.getElementById('next').disabled = thread.length < limit;
+        });
     </script>
 {% endblock %}

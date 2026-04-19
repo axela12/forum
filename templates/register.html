@@ -15,7 +15,7 @@
 
 {% block scripts %}
     <script>
-        document.querySelector('#registerForm').addEventListener('submit', e => {
+        document.querySelector('#registerForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
             const username = document.getElementById('username').value;
@@ -23,7 +23,19 @@
             const confirmPassword = document.getElementById('confirmPassword').value;
             const email = document.getElementById('email').value;
             
-            register(username, password, confirmPassword, email);
+            try {
+                await register(username, password, confirmPassword, email);
+                window.location.href = '/';
+            } catch (err) {
+                console.error(err.message);
+                if (!document.querySelector('#registerError')) {
+                    const p = document.createElement('p');
+                    p.id = 'registerError';
+                    p.className = 'error-message';
+                    p.textContent = err.message || 'An error occurred during registration';
+                    document.querySelector('#registerDiv')?.appendChild(p);
+                }
+            }
         });
     </script>
 {% endblock %}

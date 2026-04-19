@@ -15,16 +15,8 @@ async function login(username, password) {
         }
 
         localStorage.setItem('access_token', data.access_token);
-        window.location.href = "/";
     } catch (err) {
-        console.error(err.message);
-        if (!document.querySelector('#loginError')) {
-            const p = document.createElement('p');
-            p.id = 'loginError';
-            p.className = 'error-message';
-            p.textContent = err.message || 'An error occurred during login';
-            document.querySelector('#loginDiv')?.appendChild(p);
-        }
+        throw err;
     }
 }
 
@@ -49,15 +41,9 @@ async function register(username, password, confirm_password, email) {
         }
 
         await login(username, password);
+        window.location.href = '/';
     } catch (err) {
-        console.error(err.message);
-        if (!document.querySelector('#registerError')) {
-            const p = document.createElement('p');
-            p.id = 'registerError';
-            p.className = 'error-message';
-            p.textContent = err.message || 'An error occurred during registration';
-            document.querySelector('#registerDiv')?.appendChild(p);
-        }
+        throw err;
     }
 }
 
@@ -78,7 +64,7 @@ async function logout() {
         if (data.message) {
             console.log(data.message);
         }
-        window.location.href = "/";
+        window.location.reload();
     } catch (err) {
         console.error("Logout request failed:", err);
     } finally {
@@ -110,13 +96,25 @@ function toggleLogin() {
         if (e.target === overlay) overlay.remove();
     });
 
-    div.querySelector('#loginForm').addEventListener('submit', e => {
+    div.querySelector('#loginForm').addEventListener('submit', async (e) => {
         e.preventDefault();
 
         const username = document.querySelector('#username').value;
         const password = document.querySelector('#password').value;
 
-        login(username, password);
+        try {
+            await login(username, password);
+            window.location.reload();
+        } catch (err) {
+            console.error(err.message);
+            if (!document.querySelector('#loginError')) {
+                const p = document.createElement('p');
+                p.id = 'loginError';
+                p.className = 'error-message';
+                p.textContent = err.message || 'An error occurred during login';
+                document.querySelector('#loginDiv')?.appendChild(p);
+            }
+        }
     });
 
     overlay.appendChild(div);
@@ -152,28 +150,40 @@ async function toggleHeader(username) {
 }
 
 async function getProfile() {
-    const res = await fetch('/profile', {
-        method: 'GET',
-        headers: {
-            "Authorization": `Bearer ${localStorage.getItem('access_token')}`
+    try {
+        if (!localStorage.getItem('access_token')) {
+            throw new Error("No access token found");
         }
-    });
 
-    const data = await res.json().catch(() => null);
+        const res = await fetch('/profile', {
+            method: 'GET',
+            headers: {
+                "Authorization": `Bearer ${localStorage.getItem('access_token')}`
+            }
+        });
 
-    if (!res.ok) {
-        throw new Error(data?.error || "Profile retrieval failed");
+        const data = await res.json().catch(() => null);
+
+        if (!res.ok) {
+            throw new Error(data?.error || "Profile retrieval failed");
+        }
+
+        return data;
+    } catch (err) {
+        console.error("Error fetching user data:", err);
+        return null;
     }
-
-    return data;
 }
 
 async function getUser(user_id) {
     try {
+        if (!localStorage.getItem('access_token')) {
+            throw new Error("No access token found");
+        }
+
         const res = await fetch(`/users/${user_id}`, {
             method: 'GET',
             headers: {
-                "Content-Type": "application/json",
                 "Authorization": `Bearer ${localStorage.getItem('access_token')}`
             }
         });
@@ -193,7 +203,7 @@ async function getUser(user_id) {
 
 async function createThread(title, content) {
     try {
-        if (!localStorage.getItem('user_id')) {
+        if (!localStorage.getItem('access_token')) {
             throw new Error("You must be logged in to create a thread");
         }
 
@@ -204,7 +214,8 @@ async function createThread(title, content) {
                 "Authorization": `Bearer ${localStorage.getItem('access_token')}`
             },
             body: JSON.stringify({
-                "title": title
+                "title": title,
+                "content": content
             })
         });
 
@@ -214,7 +225,7 @@ async function createThread(title, content) {
             throw new Error(data?.error || "Failed to create thread");
         }
 
-        createPost(data.id, content);
+        window.location.href = `/thread/${data.id}`;
     } catch (err) {
         console.error(err);
         if (!document.querySelector('#postError')) {
@@ -222,24 +233,31 @@ async function createThread(title, content) {
             p.id = 'postError';
             p.className = 'error-message';
             p.textContent = err.message || 'An error occurred while creating the thread';
-            document.querySelector('#new-thread-form').appendChild(p);
+            document.querySelector('#new-thread-form')?.appendChild(p);
         }
     }
 }
 
 async function createPost(threadId, content) {
     try {
+        if (!localStorage.getItem('access_token')) {
+            throw new Error("You must be logged in to create a post");
+        }
+
         const res = await fetch(`/threads/${threadId}`, {
             method: 'POST',
             headers: {
                 "Content-Type": "application/json",
                 "Authorization": `Bearer ${localStorage.getItem('access_token')}`
             },
-            body: JSON.stringify({content})
+            body: JSON.stringify({
+                "content": content
+            })
         });
 
+        const data = await res.json().catch(() => null);
+
         if (!res.ok) {
-            const data = await res.json().catch(() => null);
             throw new Error(data?.error || "Failed to create post");
         }
     } catch (err) {
@@ -249,22 +267,24 @@ async function createPost(threadId, content) {
             p.id = 'postError';
             p.className = 'error-message';
             p.textContent = err.message || 'An error occurred while creating the post';
-            document.querySelector('#new-post-form').appendChild(p);
+            document.querySelector('#new-post-form')?.appendChild(p);
         }
     }
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    let username = null;
     if (localStorage.getItem('access_token')) {
-        const res = await getProfile();
-        if (res.user_id) {
-            localStorage.setItem('user_id', res.user_id);
-
-            await getUser(localStorage.getItem('user_id'))
-            .then(data => toggleHeader(data.username))
-            .catch(() => null);
+        const id_res = await getProfile();
+        if (id_res) {
+            const user_res = await getUser(id_res.user_id);
+            username = user_res.username || null;
         }
-    } else {
-        toggleHeader(null);
+        else {
+            logout();
+        }
     }
+    toggleHeader(username);
 });
+
+window.socket = io("http://localhost:5000");
