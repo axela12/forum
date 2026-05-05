@@ -83,8 +83,8 @@ function toggleLogin() {
         <button type="button" id="closeButton">&times;</button>
         <h1>Log In</h1>
         <form class="form-column" id="loginForm">
-            <input type="text" id="username" placeholder="Username" required>
-            <input type="password" id="password" placeholder="Password" required>
+            <input type="text" id="login-username" placeholder="Username" required>
+            <input type="password" id="login-password" placeholder="Password" required>
             <button type="submit" id="loginSubmitButton">Log In</button>
             <a href="/register">Don't have an account? Register</a>
         </form>
@@ -99,19 +99,19 @@ function toggleLogin() {
     div.querySelector('#loginForm').addEventListener('submit', async (e) => {
         e.preventDefault();
 
-        const username = document.querySelector('#username').value;
-        const password = document.querySelector('#password').value;
+        const username = document.querySelector('#login-username').value;
+        const password = document.querySelector('#login-password').value;
 
         try {
             await login(username, password);
             window.location.reload();
         } catch (err) {
-            console.error(err.message);
+            console.error(err);
             if (!document.querySelector('#loginError')) {
                 const p = document.createElement('p');
                 p.id = 'loginError';
                 p.className = 'error-message';
-                p.textContent = err.message || 'An error occurred during login';
+                p.textContent = err || 'An error occurred during login';
                 document.querySelector('#loginDiv')?.appendChild(p);
             }
         }
@@ -245,7 +245,7 @@ async function createThread(title, content) {
             const p = document.createElement('p');
             p.id = 'postError';
             p.className = 'error-message';
-            p.textContent = err.message || 'An error occurred while creating the thread';
+            p.textContent = err || 'An error occurred while creating the thread';
             document.querySelector('#new-thread-form')?.appendChild(p);
         }
     }
@@ -279,7 +279,7 @@ async function createPost(threadId, content) {
             const p = document.createElement('p');
             p.id = 'postError';
             p.className = 'error-message';
-            p.textContent = err.message || 'An error occurred while creating the post';
+            p.textContent = err || 'An error occurred while creating the post';
             document.querySelector('#new-post-form')?.appendChild(p);
         }
     }

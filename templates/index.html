@@ -46,7 +46,7 @@
 
         async function getThreads(limit, last_post_at = null, lastId = null) {
             try {
-                let url = `/threads?limit=${limit}`;
+                let url = `/threads?limit=${limit + 1}`;
                 if (last_post_at) url += `&last_post_at=${encodeURIComponent(last_post_at)}`;
                 if (lastId) url += `&last_id=${encodeURIComponent(lastId)}`;
                 const res = await fetch(url, {
@@ -104,6 +104,12 @@
 
             threads = await getThreads(limit);
 
+            const hasMore = threads.length > limit;
+
+            if (hasMore) {
+                threads = threads.slice(0, limit);
+            }
+
             pageCache = [threads];
             stack = [{
                 last_post_at: threads.at(-1)?.last_post_at || null,
@@ -118,7 +124,7 @@
             document.getElementById('prev').disabled = true;
             document.getElementById('first').disabled = true;
             updatePageInfo();
-            document.getElementById('next').disabled = threads.length < limit;
+            document.getElementById('next').disabled = !hasMore;
         }
 
         document.addEventListener('DOMContentLoaded', async () => {
@@ -232,6 +238,12 @@
                 cursor.lastId
             );
 
+            const hasMore = threads.length > limit;
+
+            if (hasMore) {
+                threads = threads.slice(0, limit);
+            }
+
             if (!threads.length) return;
 
             currentPage++;
@@ -247,7 +259,7 @@
             document.getElementById('first').disabled = false;
             document.getElementById('prev').disabled = currentPage === 0;
             updatePageInfo();
-            document.getElementById('next').disabled = threads.length < limit;
+            document.getElementById('next').disabled = !hasMore;
         });
 
         document.getElementById('prev').addEventListener('click', () => {

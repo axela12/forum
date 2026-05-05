@@ -147,24 +147,24 @@ def post_user():
 
         hashed_password = generate_password_hash(password)
         cursor.execute(
-            "INSERT INTO users (username, email, password) VALUES (%s, %s, %s)",
+            "INSERT INTO users (username, email, password) VALUES (%s, %s, %s, %s)",
             (username, email, hashed_password)
         )
-        connection.commit()
         user_id = cursor.lastrowid
 
+        connection.commit()
+
         cursor.execute(
-            "SELECT username, role, created_at FROM users WHERE id = %s",
+            "SELECT role, created_at FROM users WHERE id = %s",
             (user_id,)
         )
         user = cursor.fetchone()
 
-        if not user:
-            return jsonify({"error": "Användaren hittades inte"}), 404
-
         room = "users"
         socketio.emit('new_user', {
-            "username": user["username"],
+            "id": user_id,
+            "username": username,
+            "email": email,
             "role": user["role"],
             "created_at": user["created_at"].isoformat()
         }, room=room)
@@ -290,7 +290,7 @@ def put_user(id):
 
         connection.start_transaction()
 
-        cursor.execute("SELECT 1 FROM users WHERE id = %s", (id,))
+        cursor.execute("SELECT username, email, password, role FROM users WHERE id = %s", (id,))
         user = cursor.fetchone()
 
         if not user:
@@ -300,15 +300,16 @@ def put_user(id):
         email = data.get("email", user["email"])
         username = data.get("username", user["username"])
         password = data.get("password", user["password"])
+        role = data.get("role", user["role"])
 
         hashed_password = generate_password_hash(password)
         cursor.execute(
             """
             UPDATE users
-            SET username = %s, email = %s, password = %s
+            SET username = %s, email = %s, password = %s, role = %s
             WHERE id = %s
             """,
-            (username, email, hashed_password, id)
+            (username, email, hashed_password, role, id)
         )
         connection.commit()
 
