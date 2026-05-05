@@ -121,12 +121,12 @@ function toggleLogin() {
     document.body.appendChild(overlay);
 }
 
-async function toggleHeader(username) {
-    if (username) {
+async function toggleHeader(user) {
+    if (user.username) {
         if (!document.querySelector('#logoutButton')) {
             let profile = document.createElement('div');
             profile.id = 'profile';
-            profile.textContent = username;
+            profile.textContent = user.username;
             document.querySelector('#header')?.appendChild(profile);
 
             document.querySelector('#loginButton')?.remove();
@@ -135,11 +135,24 @@ async function toggleHeader(username) {
             logoutButton.textContent = 'Log out';
             logoutButton.addEventListener('click', logout);
             document.querySelector('#header')?.appendChild(logoutButton);
+
+            if (user.role === 'admin') {
+                if (!document.querySelector('#usersButton')) {
+                    let usersButton = document.createElement('button');
+                    usersButton.id = 'usersButton';
+                    usersButton.textContent = 'Users';
+                    usersButton.addEventListener('click', () => {
+                        window.location.href = '/admin';
+                    });
+                    document.querySelector('#header')?.appendChild(usersButton);
+                }
+            }
         }
     } else {
         if (!document.querySelector('#loginButton')) {
             document.querySelector('#profile')?.remove();
             document.querySelector('#logoutButton')?.remove();
+            document.querySelector('#usersButton')?.remove();
             let loginButton = document.createElement('button');
             loginButton.id = 'loginButton';
             loginButton.textContent = 'Log in';
@@ -273,18 +286,18 @@ async function createPost(threadId, content) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-    let username = null;
+    let user = { username: null, role: null };
     if (localStorage.getItem('access_token')) {
         const id_res = await getProfile();
         if (id_res) {
             const user_res = await getUser(id_res.user_id);
-            username = user_res.username || null;
-        }
-        else {
-            logout();
+            if (user_res) {
+                user = user_res;
+                localStorage.setItem('userdata', JSON.stringify(user));
+            }
         }
     }
-    toggleHeader(username);
+    toggleHeader(user);
 });
 
 window.socket = io("http://localhost:5000");

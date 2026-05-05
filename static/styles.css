@@ -107,31 +107,29 @@ button:hover {
     color: red;
 }
 
-.container {
-    border: 1px solid black;
-    padding: 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-#new-post-count {
+.notifications {
     font-weight: bold;
     color: green;
     cursor: pointer;
 }
 
-.thread {
-    border-bottom: 1px solid #ccc;
-    padding: 10px 0;
-}
-
-.post {
-    border-bottom: 1px solid #ccc;
-    padding: 10px 0;
+.container {
+    border: 1px solid black;
     display: flex;
     flex-direction: column;
-    margin-bottom: 10px;
+}
+
+.container > * {
+    padding: 10px;
+}
+
+.item {
+    display: flex;
+    flex-direction: column;
+}
+
+.item:nth-child(odd) {
+    background-color: #f9f9f9;
 }
 
 .post-header {

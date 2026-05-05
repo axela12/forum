@@ -7,7 +7,7 @@
         <p>Loading new-post-form...</p>
     </form>
 
-    <span id="new-post-count"></span>
+    <span id="notifications" class="notifications"></span>
 
     <div id="posts-container" class="container">
         <p>Loading posts...</p>
@@ -30,6 +30,8 @@
 
 {% block scripts %}
     <script>
+        let thread = [];
+        let limit = null;
         let stack = [];
         let pageCache = [];
         let currentPage = 0;
@@ -72,7 +74,7 @@
 
             thread.forEach(post => {
                 const div = document.createElement('div');
-                div.classList.add('post');
+                div.classList.add('item');
 
                 const header = document.createElement('div');
                 header.classList.add('post-header');
@@ -99,9 +101,9 @@
         }
 
         async function loadFirstPage() {
-            const limit = parseInt(document.getElementById('limit').value);
+            limit = parseInt(document.getElementById('limit').value);
 
-            const thread = await getPosts(limit);
+            thread = await getPosts(limit);
 
             pageCache = [thread];
             stack = [{
@@ -110,7 +112,7 @@
             }];
             currentPage = 0;
             newPostsCount = 0;
-            document.getElementById('new-post-count').textContent = '';
+            document.getElementById('notifications').textContent = '';
 
             renderPosts(thread);
 
@@ -119,12 +121,6 @@
             updatePageInfo();
             document.getElementById('next').disabled = thread.length < limit;
         }
-
-        window.addEventListener("beforeunload", () => {
-            socket.emit("leave_room", {
-                room: `thread_${threadId}`
-            });
-        });
 
         document.addEventListener('DOMContentLoaded', async () => {
             const newPostForm = document.getElementById('new-post-form');
@@ -148,28 +144,14 @@
                 newPostForm.innerHTML = '<p>Please log in to create a post.</p>';
             }
 
-            const limit = parseInt(document.getElementById('limit').value);
+            loadFirstPage();
 
-            const thread = await getPosts(limit);
+            socket.on("error", (err) => {
+                console.error("WebSocket connection error", err);
+            });
 
-            pageCache = [thread];
-            stack = [{
-                last_created_at: thread.at(-1)?.created_at || null,
-                lastId: thread.at(-1)?.id || null
-            }];
-            currentPage = 0;
-
-            renderPosts(thread);
-
-            document.getElementById('first').disabled = true;
-            document.getElementById('prev').disabled = true;
-            updatePageInfo();
-            document.getElementById('next').disabled = thread.length < limit;
-
-            socket.on("connect", () => {
-                socket.emit("join_room", {
-                    room: `thread_${threadId}`
-                });
+            socket.on("joined_room", (data) => {
+                console.log(`Joined room: ${data.room}`);
             });
 
             socket.on("new_post", (post) => {
@@ -185,21 +167,27 @@
                     renderPosts(thread);
                 } else {
                     newPostsCount++;
-                    document.getElementById('new-post-count').textContent = `New posts: ${newPostsCount}`;
+                    document.getElementById('notifications').textContent = `New posts: ${newPostsCount}`;
                 }
+            });
+            
+            socket.on("connect", () => {
+                socket.emit("join_room", {
+                    room: `thread_${threadId}`
+                });
             });
         });
 
-        document.getElementById('new-post-count').addEventListener('click', loadFirstPage);
+        document.getElementById('notifications').addEventListener('click', loadFirstPage);
         document.getElementById('limit').addEventListener('change', loadFirstPage);
         document.getElementById('first').addEventListener('click', loadFirstPage);
 
         document.getElementById('next').addEventListener('click', async () => {
-            const limit = parseInt(document.getElementById('limit').value);
+            limit = parseInt(document.getElementById('limit').value);
 
             const cursor = stack[currentPage];
 
-            const thread = await getPosts(
+            thread = await getPosts(
                 limit,
                 cursor.last_created_at,
                 cursor.lastId
@@ -230,14 +218,14 @@
 
             if (currentPage === 0) {
                 newPostsCount = 0;
-                document.getElementById('new-post-count').textContent = '';
+                document.getElementById('notifications').textContent = '';
             }
 
-            const thread = pageCache[currentPage];
+            thread = pageCache[currentPage];
 
             renderPosts(thread);
 
-            const limit = parseInt(document.getElementById('limit').value);
+            limit = parseInt(document.getElementById('limit').value);
 
             document.getElementById('first').disabled = currentPage === 0;
             document.getElementById('prev').disabled = currentPage === 0;

@@ -6,7 +6,8 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 from mysql.connector import Error, connect
 from werkzeug.security import check_password_hash, generate_password_hash
 from flask_jwt_extended import (
-    JWTManager, jwt_required, get_jwt_identity, get_jwt, create_access_token, decode_token
+    JWTManager, jwt_required, get_jwt_identity, get_jwt,
+    verify_jwt_in_request, create_access_token, decode_token
 )
 
 app = Flask(__name__)
@@ -15,7 +16,7 @@ app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(minutes=30)
 CORS(
     app,
     supports_credentials=True,
-    origins=["http://localost:5000", "http://10.32.37.5:5000"]
+    origins=["http://localost:5000"]
 )
 jwt = JWTManager(app)
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -45,21 +46,29 @@ def role_required(required_role):
             claims = get_jwt()
             user_role = claims.get('role', 'user')
             if user_role != required_role:
-                abort(403, description="Forbidden: Insufficient privileges")
+                return jsonify({"error": "Forbidden: Insufficient privileges"}), 403
             return f(*args, **kwargs)
         return wrapper
     return decorator
 
 @app.before_request
-@jwt_required(optional=True)
 def check_revoked_token():
-    jti = get_jwt().get('jti')
-    if jti in blocklisted_tokens:
-        return jsonify({"error": "Token revoked"}), 401
+    try:
+        verify_jwt_in_request(optional=True)
+        jwt_data = get_jwt()
+        if jwt_data:
+            jti = jwt_data.get("jti")
+            if jti in blocklisted_tokens:
+                return jsonify({"error": "Token revoked"}), 401
+    except Exception:
+        pass
 
 # logga in
 @app.route("/login", methods=["POST"])
 def login():
+    connection = None
+    cursor = None
+
     try:
         data = request.get_json()
         username = data.get("username")
@@ -111,6 +120,9 @@ def get_profile():
 # registrera
 @app.route("/users", methods=["POST"])
 def post_user():
+    connection = None
+    cursor = None
+
     try:
         data = request.get_json()
         username = data.get("username")
@@ -123,9 +135,15 @@ def post_user():
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
-        cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+        connection.start_transaction()
+
+        cursor.execute("SELECT 1 FROM users WHERE username = %s", (username,))
         if cursor.fetchone():
             return jsonify({"error": "Användarnamnet är upptaget"}), 409
+        
+        cursor.execute("SELECT 1 FROM users WHERE email = %s", (email,))
+        if cursor.fetchone():
+            return jsonify({"error": "E-postaddressen är upptaget"}), 409
 
         hashed_password = generate_password_hash(password)
         cursor.execute(
@@ -133,10 +151,29 @@ def post_user():
             (username, email, hashed_password)
         )
         connection.commit()
+        user_id = cursor.lastrowid
+
+        cursor.execute(
+            "SELECT username, role, created_at FROM users WHERE id = %s",
+            (user_id,)
+        )
+        user = cursor.fetchone()
+
+        if not user:
+            return jsonify({"error": "Användaren hittades inte"}), 404
+
+        room = "users"
+        socketio.emit('new_user', {
+            "username": user["username"],
+            "role": user["role"],
+            "created_at": user["created_at"].isoformat()
+        }, room=room)
 
         return jsonify({"message": "Användare skapad"}), 201
         
     except Error as e:
+        if connection:
+            connection.rollback()
         print(f"Databasfel: {e}")
         return jsonify({"error": "Databasfel inträffade"}), 500
 
@@ -146,18 +183,62 @@ def post_user():
             connection.close()
 
 @app.route("/users", methods=["GET"])
-@jwt_required()
+@role_required("admin")
 def get_users():
+    connection = None
+    cursor = None
+
     try:
+        limit = request.args.get("limit", default=10, type=int)
+        last_created_at = request.args.get("last_created_at")
+        last_id = request.args.get("last_id")
+
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
-        cursor.execute("SELECT id, username, email, role FROM users")
+        connection.start_transaction()
+
+        if not last_created_at or not last_id:
+            cursor.execute("""
+                SELECT
+                    id,
+                    role,
+                    email,
+                    created_at,
+                    COALESCE(username,'Deleted user') AS username
+                FROM users
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s
+            """, (limit,))
+        else:
+            last_created_at = datetime.fromisoformat(last_created_at)
+            cursor.execute("""
+                SELECT
+                    id,
+                    role,
+                    email,
+                    created_at,
+                    COALESCE(username,'Deleted user') AS username
+                FROM users
+                WHERE (
+                    created_at < %s
+                    OR (created_at = %s AND id < %s)
+                )
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s
+            """, (last_created_at, last_created_at, last_id, limit))
+            
         users = cursor.fetchall()
 
+        for user in users:
+            if user.get("created_at"):
+                user["created_at"] = user["created_at"].isoformat()
+
         return jsonify(users)
-            
+
     except Error as e:
+        if connection:
+            connection.rollback()
         print(f"Databasfel: {e}")
         return jsonify({"error": "Databasfel inträffade"}), 500
 
@@ -169,12 +250,17 @@ def get_users():
 @app.route("/users/<int:user_id>", methods=["GET"])
 @jwt_required()
 def get_user(user_id):
+    connection = None
+    cursor = None
+
     try:
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
+        connection.start_transaction()
+
         cursor.execute(
-            "SELECT id, username, email, role FROM users WHERE id = %s",
+            "SELECT username, role FROM users WHERE id = %s",
             (user_id,)
         )
         user = cursor.fetchone()
@@ -185,6 +271,8 @@ def get_user(user_id):
         return jsonify(user)
             
     except Error as e:
+        if connection:
+            connection.rollback()
         print(f"Databasfel: {e}")
         return jsonify({"error": "Databasfel inträffade"}), 500
 
@@ -200,7 +288,9 @@ def put_user(id):
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
-        cursor.execute("SELECT id, username, password, email FROM users WHERE id = %s", (id,))
+        connection.start_transaction()
+
+        cursor.execute("SELECT 1 FROM users WHERE id = %s", (id,))
         user = cursor.fetchone()
 
         if not user:
@@ -225,6 +315,42 @@ def put_user(id):
         return jsonify({"message": "Användare uppdaterad"}), 200
             
     except Error as e:
+        if connection:
+            connection.rollback()
+        print(f"Databasfel: {e}")
+        return jsonify({"error": "Databasfel inträffade"}), 500
+
+    finally:
+        if connection and connection.is_connected():
+            cursor.close()
+            connection.close()
+
+@app.route("/users/<int:id>", methods=["DELETE"])
+@role_required("admin")
+def delete_user(id):
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        connection.start_transaction()
+
+        cursor.execute("SELECT 1 FROM users WHERE id = %s", (id,))
+        user = cursor.fetchone()
+
+        if not user:
+            return jsonify({"error": "Användaren hittades inte"}), 404
+        
+        cursor.execute(
+            "DELETE FROM users WHERE id = %s",
+            (id,)
+        )
+        connection.commit()
+
+        return jsonify({"message": "Användare raderad"}), 200
+            
+    except Error as e:
+        if connection:
+            connection.rollback()
         print(f"Databasfel: {e}")
         return jsonify({"error": "Databasfel inträffade"}), 500
 
@@ -235,6 +361,9 @@ def put_user(id):
 
 @app.route("/threads", methods=["GET"])
 def get_threads():
+    connection = None
+    cursor = None
+
     try:
         limit = request.args.get("limit", default=10, type=int)
         last_post_at = request.args.get("last_post_at")
@@ -242,6 +371,8 @@ def get_threads():
 
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
+
+        connection.start_transaction()
 
         if not last_post_at or not last_id:
             cursor.execute("""
@@ -254,11 +385,11 @@ def get_threads():
                     COALESCE(u.username,'Deleted user') AS username
                 FROM threads t
                 LEFT JOIN users u ON t.user_id = u.id
-                ORDER BY t.last_post_at DESC, t.post_count DESC, t.id DESC
+                ORDER BY t.last_post_at DESC, t.id DESC
                 LIMIT %s
             """, (limit,))
         else:
-            last_post_at = datetime.strptime(last_post_at, "%a, %d %b %Y %H:%M:%S %Z")
+            last_post_at = datetime.fromisoformat(last_post_at)
             cursor.execute("""
                 SELECT
                     t.id,
@@ -273,7 +404,7 @@ def get_threads():
                     t.last_post_at < %s
                     OR (t.last_post_at = %s AND t.id < %s)
                 )
-                ORDER BY t.last_post_at DESC, t.post_count DESC, t.id DESC
+                ORDER BY t.last_post_at DESC, t.id DESC
                 LIMIT %s
             """, (last_post_at, last_post_at, last_id, limit))
             
@@ -286,6 +417,8 @@ def get_threads():
         return jsonify(threads)
     
     except Error as e:
+        if connection:
+            connection.rollback()
         print(f"Databasfel: {e}")
         return jsonify({"error": "Databasfel inträffade"}), 500
 
@@ -297,6 +430,9 @@ def get_threads():
 @app.route("/threads", methods=["POST"])
 @jwt_required()
 def post_thread():
+    connection = None
+    cursor = None
+
     try:
         data = request.get_json()
         title = data.get("title")
@@ -373,6 +509,9 @@ def post_thread():
 
 @app.route("/threads/<int:thread_id>", methods=["GET"])
 def get_thread(thread_id):
+    connection = None
+    cursor = None
+
     try:
         limit = request.args.get("limit", default=10, type=int)
         last_created_at = request.args.get("last_created_at")
@@ -381,12 +520,10 @@ def get_thread(thread_id):
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
+        connection.start_transaction()
+
         cursor.execute("""
-            SELECT t.id, t.title, t.post_count, t.last_post_at,
-                COALESCE(u.username,'Deleted user') AS username
-            FROM threads t
-            LEFT JOIN users u ON t.user_id = u.id
-            WHERE t.id = %s
+            SELECT 1 FROM threads WHERE id = %s LIMIT 1
         """, (thread_id,))
         thread = cursor.fetchone()
 
@@ -404,14 +541,14 @@ def get_thread(thread_id):
                 LIMIT %s
             """, (thread_id, limit))
         else:
-            last_created_at = datetime.strptime(last_created_at, "%a, %d %b %Y %H:%M:%S %Z")
+            last_created_at = datetime.fromisoformat(last_created_at)
             cursor.execute("""
                 SELECT p.id, p.content, p.created_at,
                     COALESCE(u.username,'Deleted user') AS username
                 FROM posts p
                 LEFT JOIN users u ON p.user_id = u.id
                 WHERE p.thread_id = %s
-                    AND (p.created_at > %s OR (p.created_at = %s AND p.id > %s))
+                    AND (p.created_at < %s OR (p.created_at = %s AND p.id < %s))
                 ORDER BY p.created_at DESC, p.id DESC
                 LIMIT %s
             """, (thread_id, last_created_at, last_created_at, last_id, limit))
@@ -425,6 +562,8 @@ def get_thread(thread_id):
         return jsonify(posts)
     
     except Error as e:
+        if connection:
+            connection.rollback()
         print(f"Databasfel: {e}")
         return jsonify({"error": "Databasfel inträffade"}), 500
 
@@ -436,6 +575,9 @@ def get_thread(thread_id):
 @app.route("/threads/<int:thread_id>", methods=["POST"])
 @jwt_required()
 def post_post(thread_id):
+    connection = None
+    cursor = None
+
     try:
         data = request.get_json()
         content = data.get("content")
@@ -507,7 +649,7 @@ def post_post(thread_id):
 
         return jsonify({"post_id": post_id}), 201
 
-    except Exception as e:
+    except Error as e:
         if connection:
             connection.rollback()
         print(f"Databasfel: {e}")
@@ -522,17 +664,11 @@ def post_post(thread_id):
 def handle_join_room(data):
     room = data.get('room')
     if not room:
+        emit("error", {"error": "Rum saknas"})
         return
-    
+
     join_room(room)
-
-@socketio.on('leave_room')
-def handle_leave_room(data):
-    room = data.get('room')
-    if not room:
-        return
-
-    leave_room(room)
+    emit("joined_room", {"room": room})
 
 # index
 @app.route('/', methods = ['GET'])
@@ -546,11 +682,14 @@ def register():
 
 @app.route('/thread/<int:thread_id>', methods = ['GET'])
 def forum_thread(thread_id):
+    connection = None
+    cursor = None
+    
     try:
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
-        cursor.execute("SELECT id, title FROM threads WHERE id = %s", (thread_id,))
+        cursor.execute("SELECT title FROM threads WHERE id = %s", (thread_id,))
         thread = cursor.fetchone()
 
         if not thread:
@@ -558,9 +697,14 @@ def forum_thread(thread_id):
         
         return render_template('thread.html', thread_title = thread["title"])
     finally:
-        if connection.is_connected():
+        if connection and connection.is_connected():
             cursor.close()
             connection.close()
+
+# admin panel
+@app.route('/admin', methods = ['GET'])
+def admin_panel():
+    return render_template('users.html')
 
 if __name__ == '__main__':
     socketio.run(app, debug=True, port=5000)

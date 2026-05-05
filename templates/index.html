@@ -7,7 +7,7 @@
         <p>Loading new-thread-form...</p>
     </form>
 
-    <span id="new-thread-count"></span>
+    <span id="notifications" class="notifications"></span>
 
     <div id="threads-container" class="container">
         <p>Loading threads...</p>
@@ -30,6 +30,8 @@
 
 {% block scripts %}
     <script>
+        let threads = [];
+        let limit = null;
         let last_post_at = null;
         let lastId = null;
         let stack = [];
@@ -73,7 +75,7 @@
 
             threads.forEach(thread => {
                 const div = document.createElement('div');
-                div.classList.add('thread');
+                div.classList.add('item');
                 const link = document.createElement('a');
 
                 link.href = `/thread/${thread.id}`;
@@ -98,9 +100,9 @@
         }
 
         async function loadFirstPage() {
-            const limit = parseInt(document.getElementById('limit').value);
+            limit = parseInt(document.getElementById('limit').value);
 
-            const threads = await getThreads(limit);
+            threads = await getThreads(limit);
 
             pageCache = [threads];
             stack = [{
@@ -109,7 +111,7 @@
             }];
             currentPage = 0;
             newThreadsCount = 0;
-            document.getElementById('new-thread-count').textContent = '';
+            document.getElementById('notifications').textContent = '';
 
             renderThreads(threads);
 
@@ -118,12 +120,6 @@
             updatePageInfo();
             document.getElementById('next').disabled = threads.length < limit;
         }
-
-        window.addEventListener("beforeunload", () => {
-            socket.emit("leave_room", {
-                room: "threads"
-            });
-        });
 
         document.addEventListener('DOMContentLoaded', async () => {
             const newThreadForm = document.getElementById('new-thread-form');
@@ -148,29 +144,14 @@
                 newThreadForm.innerHTML = '<p>Please log in to create a thread.</p>';
             }
 
+            loadFirstPage();
 
-            const limit = parseInt(document.getElementById('limit').value);
+            socket.on("error", (err) => {
+                console.error("WebSocket connection error", err);
+            });
 
-            const threads = await getThreads(limit);
-
-            pageCache = [threads];
-            stack = [{
-                last_post_at: threads.at(-1)?.last_post_at || null,
-                lastId: threads.at(-1)?.id || null
-            }];            
-            currentPage = 0;
-
-            renderThreads(threads);
-
-            document.getElementById('first').disabled = true;
-            document.getElementById('prev').disabled = true;
-            updatePageInfo();
-            document.getElementById('next').disabled = threads.length < limit;
-
-            socket.on("connect", () => {
-                socket.emit("join_room", {
-                    room: "threads"
-                });
+            socket.on("joined_room", (data) => {
+                console.log(`Joined room: ${data.room}`);
             });
 
             socket.on("new_thread", (thread) => {
@@ -183,10 +164,17 @@
                         threads.pop();
                     }
 
+                    threads.sort((a, b) => {
+                        const timeDiff = new Date(b.last_post_at).getTime() - new Date(a.last_post_at).getTime();
+                        if (timeDiff !== 0) return timeDiff;
+
+                        return Number(b.id) - Number(a.id);
+                    });
+
                     renderThreads(threads);
                 } else {
                     newThreadsCount++;
-                    document.getElementById('new-thread-count').textContent = `New threads: ${newThreadsCount}`;
+                    document.getElementById('notifications').textContent = `New threads: ${newThreadsCount}`;
                 }
             });
 
@@ -196,7 +184,7 @@
                 const threadIndex = threads.findIndex(t => t.id === updated_thread.id);
                 if (threadIndex === -1) return;
 
-                const thread = threads[threadIndex];
+                thread = threads[threadIndex];
 
                 // nothing changed
                 if (thread.last_post_id === updated_thread.last_post_id) return;
@@ -216,26 +204,29 @@
                     const timeDiff = new Date(b.last_post_at).getTime() - new Date(a.last_post_at).getTime();
                     if (timeDiff !== 0) return timeDiff;
 
-                    const countDiff = Number(b.post_count) - Number(a.post_count);
-                    if (countDiff !== 0) return countDiff;
-
                     return Number(b.id) - Number(a.id);
                 });
 
                 renderThreads(threads);
             });
+
+            socket.on("connect", () => {
+                socket.emit("join_room", {
+                    room: "threads"
+                });
+            });
         });
 
-        document.getElementById('new-thread-count').addEventListener('click', loadFirstPage);
+        document.getElementById('notifications').addEventListener('click', loadFirstPage);
         document.getElementById('limit').addEventListener('change', loadFirstPage);
         document.getElementById('first').addEventListener('click', loadFirstPage);
 
         document.getElementById('next').addEventListener('click', async () => {
-            const limit = parseInt(document.getElementById('limit').value);
+            limit = parseInt(document.getElementById('limit').value);
 
             const cursor = stack[currentPage];
 
-            const threads = await getThreads(
+            threads = await getThreads(
                 limit,
                 cursor.last_post_at,
                 cursor.lastId
@@ -266,13 +257,13 @@
 
             if (currentPage === 0) {
                 newThreadsCount = 0;
-                document.getElementById('new-thread-count').textContent = '';
+                document.getElementById('notifications').textContent = '';
             }
 
-            const threads = pageCache[currentPage];
+            threads = pageCache[currentPage];
             renderThreads(threads);
 
-            const limit = parseInt(document.getElementById('limit').value);
+            limit = parseInt(document.getElementById('limit').value);
 
             document.getElementById('first').disabled = currentPage === 0;
             document.getElementById('prev').disabled = currentPage === 0;
