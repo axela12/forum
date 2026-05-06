@@ -147,7 +147,7 @@ def post_user():
 
         hashed_password = generate_password_hash(password)
         cursor.execute(
-            "INSERT INTO users (username, email, password) VALUES (%s, %s, %s, %s)",
+            "INSERT INTO users (username, email, password) VALUES (%s, %s, %s)",
             (username, email, hashed_password)
         )
         user_id = cursor.lastrowid
