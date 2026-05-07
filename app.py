@@ -28,8 +28,10 @@ DB_CONFIG = {
     'database': 'forum_db'
 }
 
+# skapa en tom jwt-blocklist
 blocklisted_tokens = set()
 
+# databasuppkoppling
 def get_db_connection():
     try:
         connection = connect(**DB_CONFIG)
@@ -51,6 +53,7 @@ def role_required(required_role):
         return wrapper
     return decorator
 
+# koll innan varje request ifall klientens jwt är blocklistad
 @app.before_request
 def check_revoked_token():
     try:
@@ -62,6 +65,8 @@ def check_revoked_token():
                 return jsonify({"error": "Token revoked"}), 401
     except Exception:
         pass
+
+# api
 
 # logga in
 @app.route("/login", methods=["POST"])
@@ -675,6 +680,7 @@ def post_post(thread_id):
             cursor.close()
             connection.close()
 
+# gå med i ett socketio-rum
 @socketio.on('join_room')
 def handle_join_room(data):
     room = data.get('room')
@@ -690,11 +696,12 @@ def handle_join_room(data):
 def index():
     return render_template('index.html')
 
-# register
+# registrera
 @app.route('/register', methods = ['GET'])
 def register():
     return render_template('register.html')
 
+# forumtråd
 @app.route('/thread/<int:thread_id>', methods = ['GET'])
 def forum_thread(thread_id):
     connection = None
@@ -716,7 +723,7 @@ def forum_thread(thread_id):
             cursor.close()
             connection.close()
 
-# admin panel
+# admin-panel
 @app.route('/admin', methods = ['GET'])
 def admin_panel():
     return render_template('users.html')
