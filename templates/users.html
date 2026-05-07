@@ -24,7 +24,7 @@
     </form>
     <div id="message-container"></div>
 
-    <span id="notifications" class="notifications"></span>
+    <div id="notifications" class="notifications"><p id="new-users"></p><p id="updated-users"></p><p id="deleted-users"></p></div>
 
     <div id="users-container" class="container">
         <p>Loading users...</p>
@@ -54,6 +54,8 @@
         let currentPage = 0;
         const container = document.getElementById('users-container');
         let newUsersCount = 0;
+        let updatedUsersCount = 0;
+        let deletedUsersCount = 0;
 
         function updatePageInfo() {
             document.getElementById('page-info').textContent = `Page ${currentPage + 1}`;
@@ -230,7 +232,11 @@
             }];
             currentPage = 0;
             newUsersCount = 0;
-            document.getElementById('notifications').textContent = '';
+            updatedUsersCount = 0;
+            deletedUsersCount = 0;
+            document.getElementById('new-users').textContent = '';
+            document.getElementById('updated-users').textContent = '';
+            document.getElementById('deleted-users').textContent = '';
 
             renderUsers(users);
 
@@ -264,7 +270,29 @@
                     renderUsers(users);
                 } else {
                     newUsersCount++;
-                    document.getElementById('notifications').textContent = `New users: ${newUsersCount}`;
+                    document.getElementById('new-users').textContent = `New users: ${newUsersCount}`;
+                }
+            });
+
+            socket.on("updated_user", (user) => {
+                users = users.map(u => u.id === user.id ? user : u);
+
+                if (currentPage === 0) {
+                    renderUsers(users);
+                } else {
+                    updatedUsersCount++;
+                    document.getElementById('updated-users').textContent =
+                        `Updated users: ${updatedUsersCount}`;
+                }
+            });
+
+            socket.on("deleted_user", (user) => {
+                if (currentPage === 0) {
+                    renderUsers(users);
+                } else {
+                    deletedUsersCount++;
+                    document.getElementById('deleted-users').textContent =
+                        `Deleted users: ${deletedUsersCount}`;
                 }
             });
 
@@ -323,7 +351,11 @@
 
             if (currentPage === 0) {
                 newUsersCount = 0;
-                document.getElementById('notifications').textContent = '';
+                updatedUsersCount = 0;
+                deletedUsersCount = 0;
+                document.getElementById('new-users').textContent = '';
+                document.getElementById('updated-users').textContent = '';
+                document.getElementById('deleted-users').textContent = '';
             }
 
             users = pageCache[currentPage];

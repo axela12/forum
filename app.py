@@ -290,7 +290,7 @@ def put_user(id):
 
         connection.start_transaction()
 
-        cursor.execute("SELECT username, email, password, role FROM users WHERE id = %s", (id,))
+        cursor.execute("SELECT username, email, password, role, created_at FROM users WHERE id = %s", (id,))
         user = cursor.fetchone()
 
         if not user:
@@ -312,6 +312,15 @@ def put_user(id):
             (username, email, hashed_password, role, id)
         )
         connection.commit()
+
+        room = "users"
+        socketio.emit('updated_user', {
+            "id": id,
+            "username": username,
+            "email": email,
+            "role": role,
+            "created_at": user["created_at"].isoformat()
+        }, room=room)
 
         return jsonify({"message": "Användare uppdaterad"}), 200
             
@@ -346,6 +355,11 @@ def delete_user(id):
             (id,)
         )
         connection.commit()
+
+        room = "users"
+        socketio.emit('deleted_user', {
+            "id": id
+        }, room=room)
 
         return jsonify({"message": "Användare raderad"}), 200
             
