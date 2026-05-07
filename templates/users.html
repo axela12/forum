@@ -287,9 +287,13 @@
             });
 
             socket.on("deleted_user", (user) => {
-                if (currentPage === 0) {
+                const exists = users.some(u => u.id === user.id);
+
+                if (exists) {
+                    users = users.filter(u => u.id !== user.id);
+                    pageCache[currentPage] = users;
                     renderUsers(users);
-                } else {
+                } else if (currentPage !== 0) {
                     deletedUsersCount++;
                     document.getElementById('deleted-users').textContent =
                         `Deleted users: ${deletedUsersCount}`;
